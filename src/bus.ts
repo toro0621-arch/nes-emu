@@ -1,11 +1,13 @@
+import { Controller } from './controller';
 import type { Cpu, CpuBus } from './cpu';
 import type { Mapper } from './mappers/mapper';
 import type { Ppu } from './ppu';
 
-// CPU から見たメモリマップ。APU・コントローラーは後の段階でつなぐ
+// CPU から見たメモリマップ。APU は後の段階でつなぐ
 export class NesBus implements CpuBus {
   ram = new Uint8Array(0x800);
   cpu!: Cpu;
+  pads = [new Controller(), new Controller()];
 
   constructor(
     public mapper: Mapper,
@@ -15,7 +17,10 @@ export class NesBus implements CpuBus {
   read(addr: number): number {
     if (addr < 0x2000) return this.ram[addr & 0x7ff];
     if (addr < 0x4000) return this.ppu.readReg(addr);
-    if (addr < 0x4020) return 0; // APU・I/O（未実装）
+    // 上位ビットはデータバスの残り（直前に読んだアドレスの上位バイト $40）が見える
+    if (addr === 0x4016) return 0x40 | this.pads[0].read();
+    if (addr === 0x4017) return 0x40 | this.pads[1].read();
+    if (addr < 0x4020) return 0; // APU（未実装）
     return this.mapper.cpuRead(addr);
   }
 
@@ -23,7 +28,10 @@ export class NesBus implements CpuBus {
     if (addr < 0x2000) this.ram[addr & 0x7ff] = v;
     else if (addr < 0x4000) this.ppu.writeReg(addr, v);
     else if (addr === 0x4014) this.oamDma(v);
-    else if (addr < 0x4020) return; // APU・I/O（未実装）
+    else if (addr === 0x4016) {
+      this.pads[0].write(v);
+      this.pads[1].write(v);
+    } else if (addr < 0x4020) return; // APU（未実装）
     else this.mapper.cpuWrite(addr, v);
   }
 

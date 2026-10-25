@@ -21,7 +21,21 @@
       <p id="message">ROM ファイル（.nes）を選んでください</p>
     </div>
     <section id="pad">
-      <p class="note">コントローラーは次の段階で追加します</p>
+      <div id="dpad">
+        <div class="arm" data-btn="UP"></div>
+        <div class="arm" data-btn="LEFT"></div>
+        <div class="hub"></div>
+        <div class="arm" data-btn="RIGHT"></div>
+        <div class="arm" data-btn="DOWN"></div>
+      </div>
+      <div id="ab">
+        <div class="round" data-btn="B">B</div>
+        <div class="round" data-btn="A">A</div>
+      </div>
+      <div id="sys">
+        <div class="pill" data-btn="SELECT"><span></span>SELECT</div>
+        <div class="pill" data-btn="START"><span></span>START</div>
+      </div>
     </section>
     <script type="module" src="/src/main.ts"></script>
   </body>

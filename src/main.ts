@@ -1,3 +1,5 @@
+import { KeyboardInput } from './input/keyboard';
+import { TouchInput } from './input/touch';
 import { Nes } from './nes';
 import { SCREEN_H, SCREEN_W } from './ppu';
 
@@ -10,6 +12,9 @@ const message = $('message');
 const fpsLabel = $('fps');
 const romInput = $<HTMLInputElement>('rom');
 const resetButton = $<HTMLButtonElement>('reset');
+
+const touch = new TouchInput($('pad'));
+const keyboard = new KeyboardInput();
 
 let nes: Nes | null = null;
 let image: ImageData | null = null;
@@ -49,6 +54,7 @@ function loop(now: number): void {
     let ran = false;
     // 半フレーム分たまったら 1 フレーム進める（60Hz 画面で毎回 1 フレームになるように）
     while (acc >= FRAME_MS / 2) {
+      nes.bus.pads[0].buttons = touch.read() | keyboard.read();
       nes.runFrame();
       acc -= FRAME_MS;
       frames++;

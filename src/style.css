@@ -78,13 +78,118 @@ header {
 #message:empty {
   display: none;
 }
+/* ---- タッチボタン ---- */
 #pad {
+  --unit: min(13vw, 60px);
+  position: relative;
   flex: 1;
+  min-height: calc(var(--unit) * 4.6);
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+#dpad {
+  position: absolute;
+  left: calc(var(--unit) * 0.35);
+  top: calc(50% - var(--unit) * 2);
+  width: calc(var(--unit) * 3);
+  height: calc(var(--unit) * 3);
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+}
+#dpad .arm,
+#dpad .hub {
+  background: var(--panel);
+  border: 1px solid #3a3a4a;
+}
+#dpad [data-btn='UP'] {
+  grid-area: 1 / 2;
+  border-radius: 8px 8px 0 0;
+  border-bottom: none;
+}
+#dpad [data-btn='LEFT'] {
+  grid-area: 2 / 1;
+  border-radius: 8px 0 0 8px;
+  border-right: none;
+}
+#dpad .hub {
+  grid-area: 2 / 2;
+  border: none;
+}
+#dpad [data-btn='RIGHT'] {
+  grid-area: 2 / 3;
+  border-radius: 0 8px 8px 0;
+  border-left: none;
+}
+#dpad [data-btn='DOWN'] {
+  grid-area: 3 / 2;
+  border-radius: 0 0 8px 8px;
+  border-top: none;
+}
+#ab {
+  position: absolute;
+  right: calc(var(--unit) * 0.35);
+  top: calc(50% - var(--unit) * 2);
+  width: calc(var(--unit) * 3.3);
+  height: calc(var(--unit) * 3);
+}
+.round {
+  position: absolute;
+  width: calc(var(--unit) * 1.45);
+  height: calc(var(--unit) * 1.45);
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: calc(var(--unit) * 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 3px 0 #8f2a26;
 }
-.note {
+/* B は左下、A は右上（斜めに並べて親指 1 本で両方押せるように） */
+.round[data-btn='B'] {
+  left: 0;
+  bottom: calc(var(--unit) * 0.2);
+}
+.round[data-btn='A'] {
+  right: 0;
+  top: calc(var(--unit) * 0.2);
+}
+#sys {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--unit) * 0.25);
+  display: flex;
+  justify-content: center;
+  gap: calc(var(--unit) * 0.6);
+}
+.pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
   color: var(--muted);
-  font-size: 13px;
+}
+.pill span {
+  width: calc(var(--unit) * 1.1);
+  height: calc(var(--unit) * 0.32);
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid #3a3a4a;
+}
+[data-btn].pressed {
+  filter: brightness(1.5);
+}
+.round.pressed {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #8f2a26;
+}
+.pill.pressed span {
+  background: #4a4a5c;
 }
