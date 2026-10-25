@@ -2,6 +2,12 @@
 export interface CpuBus {
   read(addr: number): number;
   write(addr: number, v: number): void;
+  /** CPU が n サイクル進んだ（PPU などをそのぶん進める） */
+  tick(cycles: number): void;
+  /** 命令の最後のサイクルを、読み書きの直前まで進める */
+  tickBeforeAccess(): void;
+  /** 最後のサイクルの残りを進める */
+  tickAfterAccess(): void;
 }
 
 export const C = 0x01;
@@ -45,6 +51,9 @@ export class Cpu {
   private nmiPending = false;
   /** IRQ 線（マッパーや APU が立てる。ビットごとに要因を持つ） */
   irqLine = 0;
+  // 命令の最後から 2 サイクル目で割り込みを確認し、次の命令の代わりに実行する
+  private doNmi = false;
+  private doIrq = false;
 
   // 実行中の命令のオペランド
   private addr = 0;
@@ -58,7 +67,9 @@ export class Cpu {
     this.sp = (this.sp - 3) & 0xff;
     this.p |= I;
     this.cycles += 7;
+    this.bus.tick(7);
     this.jammed = false;
+    this.nmiPending = this.doNmi = this.doIrq = false;
   }
 
   /** 電源投入直後の状態にしてリセット */
@@ -76,34 +87,44 @@ export class Cpu {
 
   /** 1 命令（または割り込み・停止 1 サイクル）を実行し、かかったサイクル数を返す */
   step(): number {
-    if (this.stall > 0) {
-      this.stall--;
+    if (this.stall > 0 || this.jammed) {
+      if (this.stall > 0) this.stall--;
       this.cycles++;
+      this.bus.tick(1);
+      this.pollInterrupts();
       return 1;
     }
-    if (this.jammed) {
-      this.cycles++;
-      return 1;
-    }
-    const start = this.cycles;
-    if (this.nmiPending) {
-      this.nmiPending = false;
-      this.interrupt(0xfffa);
-      return this.cycles - start;
-    }
-    if (this.irqLine && !(this.p & I)) {
-      this.interrupt(0xfffe);
-      return this.cycles - start;
+    if (this.doNmi || this.doIrq) {
+      const vector = this.doNmi ? 0xfffa : 0xfffe;
+      this.doNmi = this.doIrq = false;
+      this.interrupt(vector);
+      this.bus.tick(7);
+      return 7;
     }
 
     const op = OPS[this.read(this.pc)];
     this.pc = (this.pc + 1) & 0xffff;
     this.mode = op.mode;
     this.resolve(op.mode);
-    this.cycles += op.cycles;
-    if (op.pagePenalty && this.crossed) this.cycles++;
+    const n = op.cycles + (op.pagePenalty && this.crossed ? 1 : 0);
+    const before = (this.cycles += n);
+    // オペランドの読み書きは命令の最後のサイクルに起きるので、その直前まで PPU を進めておく
+    this.bus.tick(n - 1);
+    this.pollInterrupts();
+    this.bus.tickBeforeAccess();
     op.exec(this);
-    return this.cycles - start;
+    this.bus.tickAfterAccess();
+    const extra = this.cycles - before; // 分岐で増えたサイクル
+    if (extra) this.bus.tick(extra);
+    return n + extra;
+  }
+
+  private pollInterrupts(): void {
+    if (this.nmiPending) {
+      this.nmiPending = false;
+      this.doNmi = true;
+    }
+    if (this.irqLine && !(this.p & I)) this.doIrq = true;
   }
 
   // ---- メモリ ----

@@ -9,6 +9,8 @@ export interface Mapper {
   ppuRead(addr: number): number;
   ppuWrite(addr: number, v: number): void;
   mirroring(): Mirroring;
+  /** 描画中の各走査線で 1 回呼ばれる（MMC3 の IRQ カウンタ用） */
+  scanline?(): void;
 }
 
 export function createMapper(cart: Cartridge): Mapper {

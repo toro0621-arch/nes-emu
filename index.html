@@ -2,16 +2,27 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#16161d" />
     <title>NES Emu</title>
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <main>
-      <h1>NES Emu</h1>
-      <p>段階1：CPU のみ。ROM を選ぶとヘッダー情報を表示し、CPU を少し動かします。</p>
-      <input type="file" id="rom" accept=".nes" />
-      <pre id="out"></pre>
-    </main>
+    <header>
+      <label class="btn">
+        ROM を開く
+        <input type="file" id="rom" accept=".nes" hidden />
+      </label>
+      <button class="btn" id="reset" disabled>リセット</button>
+      <span id="fps"></span>
+    </header>
+    <div id="screen-wrap">
+      <canvas id="screen" width="256" height="240"></canvas>
+      <p id="message">ROM ファイル（.nes）を選んでください</p>
+    </div>
+    <section id="pad">
+      <p class="note">コントローラーは次の段階で追加します</p>
+    </section>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
