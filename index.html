@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>NES Emu</title>
+  </head>
+  <body>
+    <main>
+      <h1>NES Emu</h1>
+      <p>段階1：CPU のみ。ROM を選ぶとヘッダー情報を表示し、CPU を少し動かします。</p>
+      <input type="file" id="rom" accept=".nes" />
+      <pre id="out"></pre>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
