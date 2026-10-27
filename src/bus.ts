@@ -11,10 +11,15 @@ export class NesBus implements CpuBus {
   apu!: Apu;
   pads = [new Controller(), new Controller()];
 
+  /** CPU 1 サイクルごとに動くマッパー（なければ null） */
+  private mapperClock: (() => void) | null;
+
   constructor(
     public mapper: Mapper,
     public ppu: Ppu,
-  ) {}
+  ) {
+    this.mapperClock = mapper.cpuClock ? () => mapper.cpuClock!() : null;
+  }
 
   read(addr: number): number {
     if (addr < 0x2000) return this.ram[addr & 0x7ff];
@@ -46,6 +51,7 @@ export class NesBus implements CpuBus {
       ppu.tick();
       ppu.tick();
       ppu.tick();
+      this.mapperClock?.();
       this.apu.tick();
       this.sampleNmi();
     }
@@ -58,6 +64,7 @@ export class NesBus implements CpuBus {
 
   tickAfterAccess(): void {
     this.ppu.tick();
+    this.mapperClock?.();
     this.apu.tick();
     this.sampleNmi();
   }

@@ -4,8 +4,10 @@ import { BaseMapper, type MapperHost } from './base';
 // MMC3（TxROM）：PRG 8KB×4・CHR 1KB/2KB 単位の切り替えと、走査線を数える IRQ。
 // IRQ カウンタは PPU アドレスの A12 の立ち上がりで進む（描画中は 1 走査線に 1 回）
 export class Mapper4 extends BaseMapper {
-  private bankSelect = 0;
-  private regs = [0, 2, 4, 5, 6, 7, 0, 1];
+  protected bankSelect = 0;
+  protected regs = [0, 2, 4, 5, 6, 7, 0, 1];
+  /** $0000〜$1C00 の各 1KB に割り当てた CHR バンクの番号（TxSROM・TQROM が使う） */
+  protected chrBankNums = [0, 0, 0, 0, 0, 0, 0, 0];
   private irqLatch = 0;
   private irqCounter = 0;
   private irqReload = false;
@@ -32,7 +34,8 @@ export class Mapper4 extends BaseMapper {
         this.update();
         break;
       case 0xa000:
-        if (!odd && this.cart.mirroring !== 'four') this.mirror = v & 1 ? 'horizontal' : 'vertical';
+        if (!odd && this.cart.mirroring !== 'four' && this.cart.mapper !== 118)
+          this.mirror = v & 1 ? 'horizontal' : 'vertical';
         // 奇数（PRG RAM の保護）は、無視しても困るゲームがないので扱わない
         break;
       case 0xc000:
@@ -48,7 +51,7 @@ export class Mapper4 extends BaseMapper {
     }
   }
 
-  private update(): void {
+  protected update(): void {
     const r = this.regs;
     if (this.bankSelect & 0x40) {
       this.setPrg8k(0, -2);
@@ -62,14 +65,16 @@ export class Mapper4 extends BaseMapper {
 
     // CHR：2KB×2（R0・R1）と 1KB×4（R2〜R5）。bit7 で前後を入れ替える
     const inv = this.bankSelect & 0x80 ? 4 : 0;
-    this.setChr1k(inv ^ 0, r[0] & 0xfe);
-    this.setChr1k(inv ^ 1, r[0] | 1);
-    this.setChr1k(inv ^ 2, r[1] & 0xfe);
-    this.setChr1k(inv ^ 3, r[1] | 1);
-    this.setChr1k(inv ^ 4, r[2]);
-    this.setChr1k(inv ^ 5, r[3]);
-    this.setChr1k(inv ^ 6, r[4]);
-    this.setChr1k(inv ^ 7, r[5]);
+    const n = this.chrBankNums;
+    n[inv ^ 0] = r[0] & 0xfe;
+    n[inv ^ 1] = r[0] | 1;
+    n[inv ^ 2] = r[1] & 0xfe;
+    n[inv ^ 3] = r[1] | 1;
+    n[inv ^ 4] = r[2];
+    n[inv ^ 5] = r[3];
+    n[inv ^ 6] = r[4];
+    n[inv ^ 7] = r[5];
+    for (let i = 0; i < 8; i++) this.setChr1k(i, n[i]);
   }
 
   ppuRead(addr: number): number {

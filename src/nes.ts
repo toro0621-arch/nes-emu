@@ -30,6 +30,10 @@ export class Nes {
       (cycles) => (this.cpu.stall += cycles),
       (source, on) => this.setIrq(source, on),
     );
+    if (this.mapper.audioOut) {
+      const m = this.mapper;
+      this.apu.expansion = () => m.audioOut!();
+    }
     this.bus.cpu = this.cpu;
     this.bus.apu = this.apu;
     this.cpu.powerOn();

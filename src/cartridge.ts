@@ -9,6 +9,8 @@ export interface Cartridge {
   mapper: number;
   mirroring: Mirroring;
   battery: boolean;
+  /** NES 2.0 のサブマッパー番号（iNES なら 0） */
+  submapper?: number;
 }
 
 export function parseINes(data: Uint8Array): Cartridge {
@@ -23,14 +25,22 @@ export function parseINes(data: Uint8Array): Cartridge {
   // NES 2.0 でない古いヘッダーは 8〜15 バイト目にゴミが入っていることがあるので、上位ニブルを捨てる
   const isNes2 = (f7 & 0x0c) === 0x08;
   const dirty = !isNes2 && (data[12] | data[13] | data[14] | data[15]) !== 0;
-  const mapper = (f6 >> 4) | (dirty ? 0 : f7 & 0xf0);
+  let mapper = (f6 >> 4) | (dirty ? 0 : f7 & 0xf0);
+  let submapper = 0;
+  if (isNes2) {
+    mapper |= (data[8] & 0x0f) << 8;
+    submapper = data[8] >> 4;
+  }
 
   let off = 16 + (trainer ? 512 : 0);
   if (data.length < off + prgSize + chrSize) throw new Error('ROM のサイズがヘッダーと合いません');
   const prg = data.slice(off, off + prgSize);
   off += prgSize;
   const chrRam = chrSize === 0;
-  const chr = chrRam ? new Uint8Array(0x2000) : data.slice(off, off + chrSize);
+  // NES 2.0 なら CHR RAM の大きさが書いてある（なければ 8KB）
+  const chrRamShift = isNes2 ? data[11] & 0x0f : 0;
+  const chrRamSize = chrRamShift ? Math.max(0x2000, 64 << chrRamShift) : 0x2000;
+  const chr = chrRam ? new Uint8Array(chrRamSize) : data.slice(off, off + chrSize);
 
   return {
     prg,
@@ -39,5 +49,6 @@ export function parseINes(data: Uint8Array): Cartridge {
     mapper,
     mirroring: f6 & 0x08 ? 'four' : f6 & 0x01 ? 'vertical' : 'horizontal',
     battery: (f6 & 0x02) !== 0,
+    submapper,
   };
 }

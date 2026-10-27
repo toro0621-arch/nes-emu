@@ -24,6 +24,21 @@ export interface Mapper {
   readonly saveRam: Uint8Array | null;
   /** saveRam が書き換えられた（保存したら呼び出し側が false にする） */
   saveDirty: boolean;
+
+  // ---- ここから下は、必要なマッパーだけが持つ ----
+  /** CPU 1 サイクルごとに呼ばれる（サイクルで数える IRQ・拡張音源） */
+  cpuClock?(): void;
+  /** 拡張音源の今の出力（APU の出力と同じ目盛り） */
+  audioOut?(): number;
+  /** 本体のネームテーブル用メモリ（CIRAM）を受け取る */
+  attachCiram?(ciram: Uint8Array): void;
+  /** ネームテーブル（$2000-$2FFF）の読み書きをマッパーが受け持つ（ネームテーブルを切り替えるマッパー） */
+  ntRead?(addr: number): number;
+  ntWrite?(addr: number, v: number): void;
+  /** PPU がスプライトのパターンを読み始める（true）・読み終わった（false）。tall は 8×16 か */
+  ppuSpriteFetch?(on: boolean, tall: boolean): void;
+  /** 走査線の始め（ドット 0）。rendering は描画が有効か */
+  ppuScanline?(scanline: number, rendering: boolean): void;
 }
 
 /** 8KB 単位の PRG と 1KB 単位の CHR の切り替え表を持つ、マッパーの土台 */
@@ -71,11 +86,25 @@ export abstract class BaseMapper implements Mapper {
   }
 
   protected setChr1k(slot: number, bank: number): void {
-    this.chrOffsets[slot] = (bank % this.chrBanks1k) << 10;
+    const n = this.chrBanks1k;
+    this.chrOffsets[slot] = (((bank % n) + n) % n) << 10;
+  }
+
+  protected setChr2k(slot: number, bank: number): void {
+    this.setChr1k(slot, bank * 2);
+    this.setChr1k(slot + 1, bank * 2 + 1);
   }
 
   protected setChr4k(slot: number, bank: number): void {
     for (let i = 0; i < 4; i++) this.setChr1k(slot + i, bank * 4 + i);
+  }
+
+  protected setChr8k(bank: number): void {
+    for (let i = 0; i < 8; i++) this.setChr1k(i, bank * 8 + i);
+  }
+
+  protected setPrg32k(bank: number): void {
+    for (let i = 0; i < 4; i++) this.setPrg8k(i, bank * 4 + i);
   }
 
   cpuRead(addr: number): number {

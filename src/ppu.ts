@@ -76,7 +76,9 @@ export class Ppu {
   private sprBehind = new Uint8Array(SCREEN_W);
   private sprZero = new Uint8Array(SCREEN_W);
 
-  constructor(private mapper: Mapper) {}
+  constructor(private mapper: Mapper) {
+    mapper.attachCiram?.(this.vram);
+  }
 
   /** NMI 出力線（VBlank 中かつ NMI 有効） */
   nmiOutput(): boolean {
@@ -185,14 +187,20 @@ export class Ppu {
 
   private read(addr: number): number {
     if (addr < 0x2000) return this.mapper.ppuRead(addr);
-    if (addr < 0x3f00) return this.vram[this.ntIndex(addr)];
+    if (addr < 0x3f00) {
+      // ネームテーブルを自分で切り替えるマッパーは、マッパーに任せる
+      if (this.mapper.ntRead) return this.mapper.ntRead(addr & 0x2fff);
+      return this.vram[this.ntIndex(addr)];
+    }
     return this.readPalette(addr);
   }
 
   private write(addr: number, val: number): void {
     if (addr < 0x2000) this.mapper.ppuWrite(addr, val);
-    else if (addr < 0x3f00) this.vram[this.ntIndex(addr)] = val;
-    else this.palette[paletteIndex(addr)] = val & 0x3f;
+    else if (addr < 0x3f00) {
+      if (this.mapper.ntWrite) this.mapper.ntWrite(addr & 0x2fff, val);
+      else this.vram[this.ntIndex(addr)] = val;
+    } else this.palette[paletteIndex(addr)] = val & 0x3f;
   }
 
   private readPalette(addr: number): number {
@@ -246,6 +254,7 @@ export class Ppu {
     const dot = this.dot;
     this.dots++;
 
+    if (dot === 0) this.mapper.ppuScanline?.(sl, (this.mask & 0x18) !== 0);
     if (sl < 240) {
       if (dot === 0) this.refreshMirroring();
       else {
@@ -306,11 +315,13 @@ export class Ppu {
       this.oamAddr = 0;
     } else if (dot === 261) {
       // 実機はドット 257〜320 で 8 個分のスプライトのパターンを読む。最初のパターン読み出しが 261 あたり
+      this.mapper.ppuSpriteFetch?.(true, (this.ctrl & 0x20) !== 0);
       if (visible) this.evaluateSprites(sl);
       else {
         this.clearSprites();
         this.dummySpriteFetches(0);
       }
+      this.mapper.ppuSpriteFetch?.(false, (this.ctrl & 0x20) !== 0);
     }
     if (sl === 261 && dot >= 280 && dot <= 304) {
       this.v = (this.v & ~0x7be0) | (this.t & 0x7be0);

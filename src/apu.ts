@@ -53,7 +53,7 @@ class Envelope {
   }
 }
 
-class Pulse {
+export class Pulse {
   enabled = false;
   length = 0;
   halt = false;
@@ -72,8 +72,14 @@ class Pulse {
   /** 周期が短すぎる・スイープ先が範囲外で音が出ない（周期かスイープが変わったときに計算し直す） */
   private silenced = true;
 
-  /** second: 矩形波 2（スイープの負方向の計算が 1 違う） */
-  constructor(private second: boolean) {}
+  /**
+   * second: 矩形波 2（スイープの負方向の計算が 1 違う）
+   * noSweep: スイープのない矩形波（MMC5 の拡張音源）。周期による消音もない
+   */
+  constructor(
+    private second: boolean,
+    private noSweep = false,
+  ) {}
 
   write(reg: number, v: number): void {
     switch (reg) {
@@ -104,7 +110,7 @@ class Pulse {
   }
 
   private updateSilenced(): void {
-    this.silenced = this.period < 8 || this.sweepTarget() > 0x7ff;
+    this.silenced = !this.noSweep && (this.period < 8 || this.sweepTarget() > 0x7ff);
   }
 
   /** APU サイクル（CPU 2 サイクル）ごと */
@@ -366,6 +372,8 @@ export class Apu {
   /** 出力した音（呼び出し側が取り出す） */
   samples = new Float32Array(4096);
   sampleLength = 0;
+  /** カートリッジの拡張音源（なければ null） */
+  expansion: (() => number) | null = null;
 
   constructor(
     readMem: (addr: number) => number,
@@ -500,7 +508,8 @@ export class Apu {
   private mixSample(): void {
     this.sampleSum +=
       PULSE_MIX[this.pulse1.output() + this.pulse2.output()] +
-      TND_MIX[3 * this.triangle.output() + 2 * this.noise.output() + this.dmc.level];
+      TND_MIX[3 * this.triangle.output() + 2 * this.noise.output() + this.dmc.level] +
+      (this.expansion ? this.expansion() : 0);
     this.sampleCount++;
     this.sampleAcc += 2 * this.sampleRate * this.rateAdjust;
     if (this.sampleAcc < CPU_HZ) return;
