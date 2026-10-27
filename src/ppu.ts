@@ -11,10 +11,24 @@ const NES_RGB = [
   0xfffeff, 0xc0dfff, 0xd3d2ff, 0xe8c8ff, 0xfbc2ff, 0xfec4ea, 0xfeccc5, 0xf7d8a5,
   0xe4e594, 0xcfef96, 0xbdf4ab, 0xb3f3cc, 0xb5ebf2, 0xb8b8b8, 0x000000, 0x000000,
 ];
-/** ImageData にそのまま書ける色（リトルエンディアンの ABGR） */
-const NES_ABGR = Uint32Array.from(
-  NES_RGB,
-  (c) => (0xff000000 | ((c & 0xff) << 16) | (c & 0xff00) | (c >> 16)) >>> 0,
+/**
+ * ImageData にそのまま書ける色（リトルエンディアンの ABGR）。PPUMASK の色強調ビット（赤・緑・青）の
+ * 組み合わせ 8 通りぶん。強調した色以外の成分が暗くなる（$xE・$xF の黒は変わらない）
+ */
+const EMPHASIS_DIM = 0.746;
+const NES_ABGR_EMPH: Uint32Array[] = Array.from({ length: 8 }, (_, em) =>
+  Uint32Array.from(NES_RGB, (c, i) => {
+    let r = c >> 16;
+    let g = (c >> 8) & 0xff;
+    let b = c & 0xff;
+    if (em && (i & 0x0f) < 0x0e) {
+      // 強調ビットが立つごとに、ほかの 2 色を暗くする
+      if (em & 1) (g *= EMPHASIS_DIM), (b *= EMPHASIS_DIM);
+      if (em & 2) (r *= EMPHASIS_DIM), (b *= EMPHASIS_DIM);
+      if (em & 4) (r *= EMPHASIS_DIM), (g *= EMPHASIS_DIM);
+    }
+    return (0xff000000 | (Math.round(b) << 16) | (Math.round(g) << 8) | Math.round(r)) >>> 0;
+  }),
 );
 
 // ネームテーブルのミラーリング（論理テーブル 0〜3 → 実メモリの 1KB ページ）
@@ -420,7 +434,8 @@ export class Ppu {
       // 描画オフで v がパレットを指しているときはその色が出る
       color = this.v & 0x1f;
     }
-    this.frameBuffer[sl * SCREEN_W + x] = NES_ABGR[this.palette[paletteIndex(color)] & this.greyMask()];
+    this.frameBuffer[sl * SCREEN_W + x] =
+      NES_ABGR_EMPH[mask >> 5][this.palette[paletteIndex(color)] & this.greyMask()];
   }
 }
 

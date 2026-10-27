@@ -1,9 +1,13 @@
 // 端末の中（IndexedDB）への保存。外へは送らない
 // - roms：最後に遊んだ ROM（次に開いたときに読み込む）
 // - saves：バッテリーバックアップのセーブデータ（ROM の中身のハッシュごと）
+// - library：読み込んだことのある ROM（ゲーム一覧）
+// - states：どこでもセーブ（「ROM の ID:スロット番号」ごと）
 const DB_NAME = 'nes-emu';
 const STORE = 'roms';
 const SAVES = 'saves';
+const LIBRARY = 'library';
+const STATES = 'states';
 const LAST = 'last';
 
 export interface SavedRom {
@@ -24,11 +28,12 @@ function open(): Promise<IDBDatabase> {
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    const req = indexedDB.open(DB_NAME, 3);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
-      if (!db.objectStoreNames.contains(SAVES)) db.createObjectStore(SAVES);
+      for (const name of [STORE, SAVES, LIBRARY, STATES]) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -127,6 +132,70 @@ export async function loadSram(id: string): Promise<Uint8Array | null> {
   try {
     const data = await run<Uint8Array | undefined>('readonly', (s) => s.get(id), SAVES);
     return data instanceof Uint8Array ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---- ゲーム一覧 ----
+export interface LibraryEntry {
+  id: string;
+  name: string;
+  data: Uint8Array;
+  /** 最後に遊んだ時刻（ミリ秒） */
+  lastPlayed: number;
+}
+
+export async function putLibrary(entry: LibraryEntry): Promise<void> {
+  try {
+    await run('readwrite', (s) => s.put(entry, entry.id), LIBRARY);
+  } catch {
+    // 無視
+  }
+}
+
+/** 最近遊んだ順 */
+export async function listLibrary(): Promise<LibraryEntry[]> {
+  try {
+    const all = await run<LibraryEntry[]>('readonly', (s) => s.getAll(), LIBRARY);
+    return all.filter((e) => e && e.data instanceof Uint8Array).sort((a, b) => b.lastPlayed - a.lastPlayed);
+  } catch {
+    return [];
+  }
+}
+
+/** ゲーム一覧から消す（バッテリーのセーブとどこでもセーブも一緒に消す） */
+export async function deleteLibrary(id: string): Promise<void> {
+  try {
+    await run('readwrite', (s) => s.delete(id), LIBRARY);
+    await run('readwrite', (s) => s.delete(id), SAVES);
+    await run('readwrite', (s) => s.delete(IDBKeyRange.bound(`${id}:`, `${id}:\uffff`)), STATES);
+  } catch {
+    // 無視
+  }
+}
+
+// ---- どこでもセーブ ----
+export interface StoredState {
+  /** 保存した時刻（ミリ秒） */
+  time: number;
+  /** そのときの画面（data: URL） */
+  thumb: string;
+  state: unknown;
+}
+
+export async function putState(id: string, slot: number, value: StoredState): Promise<boolean> {
+  try {
+    await run('readwrite', (s) => s.put(value, `${id}:${slot}`), STATES);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getState(id: string, slot: number): Promise<StoredState | null> {
+  try {
+    return (await run<StoredState | undefined>('readonly', (s) => s.get(`${id}:${slot}`), STATES)) ?? null;
   } catch {
     return null;
   }

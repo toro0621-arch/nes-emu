@@ -17,18 +17,42 @@
   </head>
   <body>
     <header>
-      <label class="btn">
-        ROM を開く
-        <input type="file" id="rom" hidden />
-      </label>
-      <button class="btn" id="reset" disabled>リセット</button>
+      <button class="btn" id="menu-open">≡ メニュー</button>
+      <button class="btn" id="ff" aria-pressed="false" aria-label="早送り">⏩</button>
       <button class="btn" id="sound" aria-label="音のオン・オフ">🔊</button>
       <button class="btn" id="rotate" aria-label="横画面に切り替え">横画面</button>
       <span id="fps"></span>
     </header>
     <div id="screen-wrap">
       <canvas id="screen" width="240" height="224"></canvas>
-      <p id="message">ROM ファイル（.nes）を選んでください</p>
+      <p id="message">「メニュー」からゲームを選んでください</p>
+    </div>
+    <div id="menu" hidden>
+      <div class="menu-panel" role="dialog" aria-label="メニュー">
+        <div class="menu-head">
+          <span>メニュー</span>
+          <button class="btn" id="menu-close">閉じる</button>
+        </div>
+        <section>
+          <h2>どこでもセーブ</h2>
+          <p class="hint" id="slots-hint"></p>
+          <div id="slots"></div>
+        </section>
+        <section>
+          <div class="menu-row">
+            <h2>ゲーム一覧</h2>
+            <label class="btn accent">
+              ＋ ROM を追加
+              <input type="file" id="rom" hidden />
+            </label>
+          </div>
+          <p class="hint" id="library-hint"></p>
+          <ul id="library"></ul>
+        </section>
+        <section>
+          <button class="btn" id="reset" disabled>リセット</button>
+        </section>
+      </div>
     </div>
     <div id="toast" role="status" hidden>
       <span id="toast-text"></span>

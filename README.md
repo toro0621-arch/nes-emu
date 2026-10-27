@@ -19,6 +19,8 @@ npm run build
 - [x] 段階6：マッパー 1（MMC1）・2（UxROM）・4（MMC3）… バッテリーバックアップのセーブにも対応。MMC1 を使う blargg のまとめ ROM と mmc3_test_2 に合格
 - [x] 追加：ファミコンでよく使われるマッパーをまとめて対応（下の表）。VRC6・ナムコ 163・サンソフト 5B・MMC5 の拡張音源も鳴る
 
+- [x] 追加：どこでもセーブ（ゲームごとに 3 スロット、画面のサムネイル付き）、ゲーム一覧（読み込んだ ROM を端末に覚えておく）、早送り（3 倍速）、PPUMASK の色強調
+
 ### 対応マッパー
 
 | 番号 | チップ | 主なソフト |
@@ -39,7 +41,7 @@ npm run build
 | 118・119 | MMC3 の仲間（TxSROM・TQROM） | アルマジロ、ピンボット |
 | 11・34・38・66・70・71・72・78・79・86・87・92・94・101・113・140・152・180・185・232 | 汎用ロジックのマッパー | ホーリーダイバー、クレイジークライマー、戦場の狼 など |
 
-まだ鳴らないもの：VRC7 の FM 音源（ラグランジュポイント）、MMC5 の画面分割（縦スプリット）。PPUMASK の色強調ビットも未対応。
+まだ鳴らないもの：VRC7 の FM 音源（ラグランジュポイント）、MMC5 の画面分割（縦スプリット）。
 
 ## 操作
 | NES | タッチ | キーボード |
@@ -76,12 +78,14 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `src/wakelock.ts` | プレイ中に画面を消さない（Screen Wake Lock） |
 | `vite.config.ts` | PWA の設定（manifest・Service Worker） |
 | `src/cartridge.ts` | iNES ヘッダーの読み込み |
+| `src/savestate.ts` | どこでもセーブ。CPU・PPU・APU・バス・マッパーのフィールドをたどって写し取り、書き戻す（ROM・関数・部品どうしの参照は写さない） |
 | `src/mappers/` | マッパー。`base.ts` が土台（PRG 8KB×4・CHR 1KB×8 の切り替え表と、CPU サイクル・ネームテーブル・走査線・拡張音源のフック）、`mapper.ts` が番号→実装の表。`mapper0/1/2/4.ts`、`discrete.ts`（汎用ロジック）、`mmc2.ts`、`mmc3x.ts`、`mmc5.ts`、`vrc.ts`、`namco108.ts`、`namco163.ts`、`sunsoft.ts`、`bandai.ts`、`misc.ts`（ジャレコ・アイレム・タイトー） |
 | `test/nestest.test.ts` | nestest の自動モードを公式ログと突き合わせる（PPU のタイミングも） |
 | `test/ppu.test.ts` | blargg の PPU テスト（結果は画面の文字を読む。共通部分は `test/blargg.ts`） |
 | `test/apu.test.ts` | blargg の APU テスト |
 | `test/mappers.test.ts` | MMC1・MMC3 を使う blargg のテスト ROM |
 | `test/mapper-units.test.ts` | 各マッパーのバンク切り替え・IRQ を直接確かめる |
+| `test/savestate.test.ts` | セーブしたところから動かし直すと、画面・RAM・音が同じになるか |
 | `test/mapper-more.test.ts` | あとから足したマッパー（VRC・ナムコ・サンソフト・バンダイの EEPROM・MMC5 など） |
 | `test/sound.test.ts` | 出力波形から音の高さを測る（矩形波・三角波・ノイズ、ROM から鳴らした音） |
 

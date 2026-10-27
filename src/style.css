@@ -312,3 +312,152 @@ html.landscape #toast {
   color: #fff;
   white-space: nowrap;
 }
+
+/* ---- 早送り ---- */
+#ff.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ---- メニュー（どこでもセーブ・ゲーム一覧） ---- */
+#menu {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#menu[hidden] {
+  display: none;
+}
+.menu-panel {
+  width: 100%;
+  max-width: 520px;
+  max-height: 88%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #1d1d26;
+  border: 1px solid #34344a;
+  border-radius: 16px 16px 0 0;
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+}
+html.landscape #menu {
+  align-items: center;
+}
+html.landscape .menu-panel {
+  border-radius: 16px;
+  max-height: 92%;
+  padding-bottom: 16px;
+}
+.menu-head,
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.menu-head {
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+.menu-panel section {
+  border-top: 1px solid #2c2c3c;
+  padding: 12px 0 4px;
+  margin-top: 8px;
+}
+.menu-panel h2 {
+  font-size: 14px;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.menu-row h2 {
+  margin: 0;
+}
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.hint:empty {
+  display: none;
+}
+.btn.accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn.warn {
+  background: #6b2b2b;
+  border-color: #a04040;
+  color: #fff;
+}
+.slot {
+  display: grid;
+  grid-template-columns: 72px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.slot .thumb {
+  width: 72px;
+  aspect-ratio: 240 / 224;
+  border-radius: 4px;
+  background: #000;
+  object-fit: cover;
+  image-rendering: pixelated;
+  border: 1px solid #34344a;
+}
+.slot .info {
+  font-size: 13px;
+  line-height: 1.4;
+  min-width: 0;
+}
+.slot .info small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.slot .btn {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+#library {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+#library li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+#library .play {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#library .play span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#library .play small {
+  color: var(--muted);
+  font-size: 11px;
+}
+#library li.current .play {
+  border-color: var(--accent);
+}
+#library .del {
+  padding: 8px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
