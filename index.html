@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#16161d" />
+    <meta name="description" content="スマホのブラウザで動くファミコン（NES）エミュレータ" />
+    <!-- iOS でホーム画面に追加したとき、全画面のアプリとして開く -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="NES Emu" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="/icons/favicon.png" />
     <title>NES Emu</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -11,7 +19,7 @@
     <header>
       <label class="btn">
         ROM を開く
-        <input type="file" id="rom" accept=".nes" hidden />
+        <input type="file" id="rom" hidden />
       </label>
       <button class="btn" id="reset" disabled>リセット</button>
       <button class="btn" id="sound" aria-label="音のオン・オフ">🔊</button>
@@ -20,6 +28,10 @@
     <div id="screen-wrap">
       <canvas id="screen" width="256" height="240"></canvas>
       <p id="message">ROM ファイル（.nes）を選んでください</p>
+    </div>
+    <div id="toast" role="status" hidden>
+      <span id="toast-text"></span>
+      <button class="btn" id="toast-action" hidden></button>
     </div>
     <section id="pad">
       <div id="dpad">

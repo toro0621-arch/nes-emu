@@ -1,8 +1,11 @@
+import { registerSW } from 'virtual:pwa-register';
 import { AudioOutput } from './audio/output';
 import { KeyboardInput } from './input/keyboard';
 import { TouchInput } from './input/touch';
 import { Nes } from './nes';
 import { SCREEN_H, SCREEN_W } from './ppu';
+import { loadLastRom, saveLastRom } from './storage';
+import { keepScreenOn } from './wakelock';
 
 const FRAME_MS = 1000 / 60.0988; // NTSC の NES のフレームレート
 
@@ -49,23 +52,64 @@ for (const type of ['pointerup', 'touchend', 'keydown', 'click']) {
   document.addEventListener(type, unlockAudio, { capture: true });
 }
 
-romInput.addEventListener('change', async () => {
-  const file = romInput.files?.[0];
-  romInput.value = '';
-  if (!file) return;
+function startRom(name: string, data: Uint8Array): boolean {
   try {
-    nes = new Nes(new Uint8Array(await file.arrayBuffer()));
+    nes = new Nes(data);
     // PPU の画面バッファをそのまま ImageData として使う（コピーなし）
     image = new ImageData(new Uint8ClampedArray(nes.ppu.frameBuffer.buffer), SCREEN_W, SCREEN_H);
     message.textContent = '';
     resetButton.disabled = false;
+    document.title = `${name.replace(/\.nes$/i, '')} - NES Emu`;
     acc = 0;
+    keepScreenOn(true);
+    return true;
   } catch (e) {
     nes = null;
     resetButton.disabled = true;
     ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
     message.textContent = e instanceof Error ? e.message : String(e);
+    keepScreenOn(false);
+    return false;
   }
+}
+
+romInput.addEventListener('change', async () => {
+  const file = romInput.files?.[0];
+  romInput.value = '';
+  if (!file) return;
+  const data = new Uint8Array(await file.arrayBuffer());
+  if (startRom(file.name, data)) void saveLastRom({ name: file.name, data });
+});
+
+// 前回の ROM があれば読み込んでおく（音は最初のタップで出始める）
+void loadLastRom().then((rom) => {
+  if (rom && !nes && startRom(rom.name, rom.data)) showToast(`前回の「${rom.name}」を読み込みました`);
+});
+
+// ---- お知らせ ----
+const toast = $('toast');
+const toastText = $('toast-text');
+const toastAction = $<HTMLButtonElement>('toast-action');
+let toastTimer = 0;
+function showToast(text: string, action?: { label: string; run: () => void }): void {
+  toastText.textContent = text;
+  toastAction.hidden = !action;
+  toastAction.textContent = action?.label ?? '';
+  toastAction.onclick = action ? () => action.run() : null;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  // ボタン付き（更新のお知らせ）は押されるまで出しておく
+  if (!action) toastTimer = window.setTimeout(() => (toast.hidden = true), 3000);
+}
+
+// ---- PWA（オフライン対応・更新） ----
+const updateSW = registerSW({
+  onNeedRefresh() {
+    showToast('新しいバージョンがあります', { label: '更新', run: () => void updateSW(true) });
+  },
+  onOfflineReady() {
+    showToast('オフラインでも使えるようになりました');
+  },
 });
 
 resetButton.addEventListener('click', () => nes?.reset());

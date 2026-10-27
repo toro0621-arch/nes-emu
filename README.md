@@ -15,7 +15,7 @@ npm run build
 - [x] 段階2：PPU（画面）… ドット単位で描画。blargg の PPU テスト 26 本すべて合格（VBlank/NMI のタイミング、スプライト0ヒットなど）
 - [x] 段階3：コントローラー・タッチボタン … 十字キー（8 方向・指を滑らせて切り替え）、A/B（間を押すと同時押し）、SELECT/START。PC はキーボード
 - [x] 段階4：APU（音）… 矩形波 2・三角波・ノイズ・DMC、フレームカウンタと IRQ。blargg の apu_test 8 本すべて合格。Web Audio（AudioWorklet）で再生
-- [ ] 段階5：PWA
+- [x] 段階5：PWA … ホーム画面に追加して全画面で起動、オフラインでも動く、前回の ROM を自動で読み込み、プレイ中は画面を消さない
 - [ ] 段階6：マッパー 1・2・4
 
 ## 操作
@@ -24,6 +24,15 @@ npm run build
 | 十字キー | 左の十字キー（斜めも可） | 矢印キー |
 | A / B | 右の赤いボタン（A と B の間で両方） | X / Z |
 | START / SELECT | 下の細いボタン | Enter / Shift |
+
+## スマホに入れる（PWA）
+1. `npm run build` でできた `dist/` を HTTPS のサーバーに置く（GitHub Pages・Cloudflare Pages など。どの URL の下でも動く）
+2. スマホのブラウザで開く
+   - iPhone（Safari）：共有ボタン →「ホーム画面に追加」
+   - Android（Chrome）：メニュー →「ホーム画面に追加」（または「アプリをインストール」）
+3. 一度開けば、あとはオフラインでも起動できる。新しい版を置くと画面の上に「更新」が出る
+
+ROM は端末の中（IndexedDB）にだけ保存し、どこにも送らない。アイコンは `python3 scripts/make-icons.py` で作り直せる。
 
 ## 音
 スマホのブラウザは、画面に触れるまで音を出せません。最初のタップ（ボタンでも画面でも）で音が出始めます。🔊 ボタンで消音できます（設定は保存）。
@@ -39,7 +48,10 @@ npm run build
 | `src/audio/` | Web Audio への出力（`output.ts`）とオーディオスレッドの再生器（`worklet.ts`） |
 | `src/controller.ts` | 標準コントローラー（$4016/$4017） |
 | `src/input/` | タッチボタン（`touch.ts`）とキーボード（`keyboard.ts`） |
-| `src/main.ts` | 画面（canvas）と 60fps のループ |
+| `src/main.ts` | 画面（canvas）と 60fps のループ、ROM の読み込み、PWA の更新のお知らせ |
+| `src/storage.ts` | 最後に遊んだ ROM の保存（IndexedDB） |
+| `src/wakelock.ts` | プレイ中に画面を消さない（Screen Wake Lock） |
+| `vite.config.ts` | PWA の設定（manifest・Service Worker） |
 | `src/cartridge.ts` | iNES ヘッダーの読み込み |
 | `src/mappers/` | マッパー（今は 0 = NROM） |
 | `test/nestest.test.ts` | nestest の自動モードを公式ログと突き合わせる（PPU のタイミングも） |

@@ -193,3 +193,34 @@ header {
 .pill.pressed span {
   background: #4a4a5c;
 }
+
+/* ---- お知らせ（更新・オフライン対応など） ---- */
+#toast {
+  position: fixed;
+  left: 50%;
+  /* ボタンに重ならないよう、画面の上に出す */
+  top: calc(60px + env(safe-area-inset-top));
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 32px);
+  padding: 10px 12px 10px 16px;
+  border-radius: 12px;
+  background: #2e2e3c;
+  border: 1px solid #45455a;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+}
+#toast[hidden],
+#toast-action[hidden] {
+  display: none;
+}
+#toast .btn {
+  padding: 6px 12px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  white-space: nowrap;
+}
