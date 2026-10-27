@@ -8,6 +8,8 @@ import { loadLastRom, loadSram, romId, saveLastRom, saveSram, saveSramNow } from
 import { keepScreenOn } from './wakelock';
 
 const FRAME_MS = 1000 / 60.0988; // NTSC の NES のフレームレート
+/** 画面のふちを切り落とす幅（canvas は 240×224） */
+const CROP = 8;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('screen');
@@ -183,7 +185,8 @@ function loop(now: number): void {
       ran = true;
     }
     if (ran) {
-      ctx.putImageData(image, 0, 0);
+      // 上下左右の 8 ドットは、実機のテレビでも見えない部分（左端の線やスクロールのちらつきが出る）なので切り落とす
+      ctx.putImageData(image, -CROP, -CROP);
       const samples = nes.apu.takeSamples();
       audio.push(samples);
       nes.apu.sampleRate = audio.sampleRate;

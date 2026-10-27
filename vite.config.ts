@@ -17,7 +17,7 @@ export default defineConfig({
         description: 'スマホのブラウザで動くファミコン（NES）エミュレータ',
         lang: 'ja',
         display: 'standalone',
-        orientation: 'portrait',
+        orientation: 'any', // 横向きでも遊べる
         start_url: '.',
         scope: '.',
         background_color: '#16161d',

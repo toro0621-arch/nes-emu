@@ -54,7 +54,7 @@ header {
   width: 100%;
   max-width: 512px;
   margin: 0 auto;
-  aspect-ratio: 256 / 240;
+  aspect-ratio: 240 / 224;
   background: #000;
 }
 #screen {
@@ -192,6 +192,56 @@ header {
 }
 .pill.pressed span {
   background: #4a4a5c;
+}
+
+/* ---- 横向き：画面を真ん中に、十字キーを左、A/B を右に ---- */
+@media (orientation: landscape) and (max-height: 600px) {
+  body {
+    --head: 44px;
+    /* 画面の高さと幅、左右に空く幅 */
+    --screen-h: calc(100dvh - var(--head) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 8px);
+    --screen-w: calc(var(--screen-h) * 240 / 224);
+    --side: calc((100vw - var(--screen-w)) / 2 - max(env(safe-area-inset-left), env(safe-area-inset-right)));
+  }
+  header {
+    height: var(--head);
+    padding: 0 12px;
+  }
+  header .btn {
+    padding: 5px 12px;
+    font-size: 13px;
+  }
+  #screen-wrap {
+    width: var(--screen-w);
+    max-width: none;
+    height: var(--screen-h);
+  }
+  /* ボタンの領域は画面の上に重ね、左右の空いたところの真ん中にボタンを置く */
+  #pad {
+    --unit: min(15vh, 58px, calc(var(--side) / 3.8));
+    position: fixed;
+    top: calc(var(--head) + env(safe-area-inset-top));
+    bottom: env(safe-area-inset-bottom);
+    left: env(safe-area-inset-left);
+    right: env(safe-area-inset-right);
+    max-width: none;
+    min-height: 0;
+    margin: 0;
+  }
+  #dpad {
+    left: calc((var(--side) - var(--unit) * 3) / 2);
+    top: calc(50% - var(--unit) * 1.9);
+  }
+  #ab {
+    right: calc((var(--side) - var(--unit) * 3.3) / 2);
+    top: calc(50% - var(--unit) * 1.9);
+  }
+  /* SELECT は十字キーの下、START は A/B の下 */
+  #sys {
+    bottom: calc(var(--unit) * 0.35);
+    justify-content: space-between;
+    padding: 0 calc((var(--side) - var(--unit) * 1.1) / 2);
+  }
 }
 
 /* ---- お知らせ（更新・オフライン対応など） ---- */
