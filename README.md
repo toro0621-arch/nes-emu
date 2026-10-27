@@ -60,3 +60,7 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `test/mappers.test.ts` | MMC1・MMC3 を使う blargg のテスト ROM |
 | `test/mapper-units.test.ts` | 各マッパーのバンク切り替え・IRQ を直接確かめる |
 | `test/sound.test.ts` | 出力波形から音の高さを測る（矩形波・三角波・ノイズ、ROM から鳴らした音） |
+
+## ライセンス
+
+MIT License（[LICENSE](LICENSE)）。ゲームの ROM は含まれていません。自分で持っているソフトから吸い出したものを使ってください。
