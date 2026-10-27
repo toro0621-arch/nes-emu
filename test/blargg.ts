@@ -19,12 +19,39 @@ function screenText(nes: Nes): string {
   return lines.join('\n');
 }
 
-/** 結果が出るまで（最大 maxFrames）動かし、画面の文字を返す */
+/**
+ * 新しめのテストは $6000 に状態（$80 = 実行中、$81 = リセットしてほしい、それ以外 = 結果コード）、
+ * $6001-$6003 に目印 DE B0 61、$6004 から結果の文章を書く
+ */
+function memoryResult(nes: Nes): { status: number; text: string } | null {
+  const bus = nes.bus;
+  if (bus.read(0x6001) !== 0xde || bus.read(0x6002) !== 0xb0 || bus.read(0x6003) !== 0x61) return null;
+  let text = '';
+  for (let a = 0x6004; a < 0x7000; a++) {
+    const c = bus.read(a);
+    if (!c) break;
+    text += String.fromCharCode(c);
+  }
+  return { status: bus.read(0x6000), text: text.trim() };
+}
+
+/** 結果が出るまで（最大 maxFrames）動かし、結果の文章を返す */
 export function runBlargg(name: string, maxFrames = 600): string {
   const nes = new Nes(new Uint8Array(readFileSync(join(ROMS, `${name}.nes`))));
   let text = '';
+  let resetAt = -1;
   for (let frame = 0; frame < maxFrames; frame++) {
     nes.runFrame();
+    const mem = memoryResult(nes);
+    if (mem) {
+      if (mem.status === 0x81 && resetAt < 0) resetAt = frame + 10; // 少し待ってからリセットを押す
+      if (frame === resetAt) {
+        nes.reset();
+        resetAt = -1;
+      }
+      if (mem.status < 0x80) return `${mem.text}\n(result ${mem.status})`;
+      continue;
+    }
     if (frame % 30 !== 29) continue;
     text = screenText(nes);
     // 2005 年版は結果コードを "$01" の形で出す（1 が合格）

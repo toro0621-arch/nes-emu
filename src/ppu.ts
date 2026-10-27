@@ -51,6 +51,8 @@ export class Ppu {
   scanline = 0;
   dot = 0;
   frame = 0;
+  /** 電源投入からの累計ドット（MMC3 が A12 の変化の間隔を測るのに使う） */
+  dots = 0;
   private oddFrame = false;
   private skipDot = false;
   /** VBlank に入ったら true（呼び出し側が下ろす） */
@@ -110,6 +112,7 @@ export class Ppu {
           this.readBuffer = this.read(addr - 0x1000);
         }
         this.incrementV();
+        this.mapper.ppuAddress?.(this.v & 0x3fff); // 進んだ v がアドレスバスに出る
         return (this.openBus = r);
       }
       default:
@@ -149,6 +152,8 @@ export class Ppu {
         } else {
           this.t = (this.t & 0xff00) | val;
           this.v = this.t;
+          // アドレスバスに新しい v が出る（MMC3 はここでも A12 の変化を見る）
+          this.mapper.ppuAddress?.(this.v & 0x3fff);
         }
         this.w ^= 1;
         break;
@@ -156,6 +161,7 @@ export class Ppu {
         this.refreshMirroring();
         this.write(this.v & 0x3fff, val);
         this.incrementV();
+        this.mapper.ppuAddress?.(this.v & 0x3fff);
         break;
     }
   }
@@ -238,6 +244,7 @@ export class Ppu {
   tick(): void {
     const sl = this.scanline;
     const dot = this.dot;
+    this.dots++;
 
     if (sl < 240) {
       if (dot === 0) this.refreshMirroring();
@@ -297,13 +304,16 @@ export class Ppu {
       this.loadShifters();
       this.v = (this.v & ~0x041f) | (this.t & 0x041f);
       this.oamAddr = 0;
+    } else if (dot === 261) {
+      // 実機はドット 257〜320 で 8 個分のスプライトのパターンを読む。最初のパターン読み出しが 261 あたり
       if (visible) this.evaluateSprites(sl);
-      else this.clearSprites();
-    } else if (sl === 261 && dot >= 280 && dot <= 304) {
+      else {
+        this.clearSprites();
+        this.dummySpriteFetches(0);
+      }
+    }
+    if (sl === 261 && dot >= 280 && dot <= 304) {
       this.v = (this.v & ~0x7be0) | (this.t & 0x7be0);
-    } else if (dot === 260) {
-      // MMC3 などは A12 の立ち上がりで走査線を数える。ここではその近似
-      this.mapper.scanline?.();
     }
   }
 
@@ -362,6 +372,19 @@ export class Ppu {
         this.sprBehind[x] = (attr >> 5) & 1;
         if (i === 0) this.sprZero[x] = 1;
       }
+    }
+    this.dummySpriteFetches(count);
+  }
+
+  /**
+   * 空いているスプライトの枠でも、実機はタイル $FF のパターンを読む。
+   * 読むアドレスで MMC3 の IRQ カウンタが進むので、データは使わないが読んでおく
+   */
+  private dummySpriteFetches(used: number): void {
+    const addr = this.ctrl & 0x20 ? 0x1000 + 0xfe * 16 : (this.ctrl & 0x08 ? 0x1000 : 0) + 0xff * 16;
+    for (let i = used; i < 8; i++) {
+      this.read(addr);
+      this.read(addr + 8);
     }
   }
 

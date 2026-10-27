@@ -379,8 +379,24 @@ export class Cpu {
     this.x = r & 0xff;
     this.zn(this.x);
   }
-  LXA(): void { this.a = this.x = (this.a | 0xee) & this.read(this.addr); this.zn(this.a); }
+  // 不安定な命令。チップによって (A | 定数) & 値 の定数が違う。テスト ROM が期待する $FF（= LAX #値）にする
+  LXA(): void { this.a = this.x = this.read(this.addr); this.zn(this.a); }
   JAM(): void { this.jammed = true; this.pc = (this.pc - 1) & 0xffff; }
+
+  // 書き込む値に「元のアドレスの上位バイト + 1」が AND される不安定な命令。
+  // ページをまたぐと、書き込み先の上位バイトも書く値になる
+  private storeHighAnd(value: number, index: number): void {
+    const base = (this.addr - index) & 0xffff;
+    const v = value & (((base >> 8) + 1) & 0xff);
+    const addr = this.crossed ? (v << 8) | (this.addr & 0xff) : this.addr;
+    this.write(addr, v);
+  }
+  SHY(): void { this.storeHighAnd(this.y, this.x); }
+  SHX(): void { this.storeHighAnd(this.x, this.y); }
+  SHA(): void { this.storeHighAnd(this.a & this.x, this.y); }
+  TAS(): void { this.sp = this.a & this.x; this.storeHighAnd(this.sp, this.y); }
+  LAS(): void { this.a = this.x = this.sp = this.read(this.addr) & this.sp; this.zn(this.a); }
+  ANE(): void { this.a = this.x & this.read(this.addr); this.zn(this.a); }
 
   // ---- デバッグ ----
   /** nestest.log と同じ並びの 1 行（逆アセンブルのオペランド表示は省略） */
@@ -470,6 +486,12 @@ def('ALR', [[0x4b, IMM, 2]]);
 def('ARR', [[0x6b, IMM, 2]]);
 def('AXS', [[0xcb, IMM, 2]]);
 def('LXA', [[0xab, IMM, 2]]);
+def('ANE', [[0x8b, IMM, 2]]);
+def('SHY', [[0x9c, ABX, 5]]);
+def('SHX', [[0x9e, ABY, 5]]);
+def('SHA', [[0x9f, ABY, 5], [0x93, IZY, 6]]);
+def('TAS', [[0x9b, ABY, 5]]);
+def('LAS', [[0xbb, ABY, 4, true]]);
 def('NOP', [
   [0x1a, IMP, 2], [0x3a, IMP, 2], [0x5a, IMP, 2], [0x7a, IMP, 2], [0xda, IMP, 2], [0xfa, IMP, 2],
   [0x80, IMM, 2], [0x82, IMM, 2], [0x89, IMM, 2], [0xc2, IMM, 2], [0xe2, IMM, 2],
@@ -478,7 +500,7 @@ def('NOP', [
   [0x0c, ABS, 4],
   [0x1c, ABX, 4, true], [0x3c, ABX, 4, true], [0x5c, ABX, 4, true], [0x7c, ABX, 4, true], [0xdc, ABX, 4, true], [0xfc, ABX, 4, true],
 ]);
-// 残り（JAM と、不安定で実用されない SHA/SHX/SHY/TAS/LAS/XAA）は CPU を止める
+// 残り（JAM）は CPU を止める
 for (let i = 0; i < 256; i++) {
   if (!OPS[i]) OPS[i] = { name: 'JAM', mode: IMP, cycles: 2, pagePenalty: false, exec: (c) => c.JAM() };
 }

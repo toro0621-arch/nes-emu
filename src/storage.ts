@@ -1,6 +1,9 @@
-// 最後に遊んだ ROM を端末の中（IndexedDB）に保存し、次に開いたときに読み込む。外へは送らない
+// 端末の中（IndexedDB）への保存。外へは送らない
+// - roms：最後に遊んだ ROM（次に開いたときに読み込む）
+// - saves：バッテリーバックアップのセーブデータ（ROM の中身のハッシュごと）
 const DB_NAME = 'nes-emu';
 const STORE = 'roms';
+const SAVES = 'saves';
 const LAST = 'last';
 
 export interface SavedRom {
@@ -8,26 +11,41 @@ export interface SavedRom {
   data: Uint8Array;
 }
 
+// 接続は開いたままにしておく。アプリを閉じる瞬間の保存で、開くのを待たずにすぐ書き始められるように
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 function open(): Promise<IDBDatabase> {
+  dbPromise ??= openDb().catch((e) => {
+    dbPromise = null;
+    throw e;
+  });
+  return dbPromise;
+}
+
+function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if (!db.objectStoreNames.contains(SAVES)) db.createObjectStore(SAVES);
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-async function run<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function run<T>(
+  mode: IDBTransactionMode,
+  fn: (store: IDBObjectStore) => IDBRequest<T>,
+  storeName = STORE,
+): Promise<T> {
   const db = await open();
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const req = fn(db.transaction(STORE, mode).objectStore(STORE));
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  } finally {
-    db.close();
-  }
+  return new Promise<T>((resolve, reject) => {
+    const req = fn(db.transaction(storeName, mode).objectStore(storeName));
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
 
 /** 保存できない環境（プライベートモードなど）では何もしない */
@@ -43,6 +61,72 @@ export async function loadLastRom(): Promise<SavedRom | null> {
   try {
     const rom = await run<SavedRom | undefined>('readonly', (s) => s.get(LAST));
     return rom && rom.data instanceof Uint8Array ? rom : null;
+  } catch {
+    return null;
+  }
+}
+
+/** ROM を見分ける ID（中身の SHA-256）。ファイル名が変わっても同じセーブデータを使える */
+export async function romId(data: Uint8Array): Promise<string> {
+  if (crypto.subtle) {
+    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', data as Uint8Array<ArrayBuffer>));
+    return Array.from(hash, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  // HTTPS でない場所では crypto.subtle が使えないので、簡単なハッシュで代用
+  let h = 0x811c9dc5;
+  for (let i = 0; i < data.length; i++) h = Math.imul(h ^ data[i], 0x01000193);
+  return `fnv-${(h >>> 0).toString(16)}-${data.length}`;
+}
+
+export async function saveSram(id: string, data: Uint8Array): Promise<boolean> {
+  try {
+    await run('readwrite', (s) => s.put(data.slice(), id), SAVES);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ページが閉じられる瞬間は IndexedDB の書き込みが間に合わないことがあるので、
+// そのときだけ localStorage に同期的に書いておき、次に読み込むときに IndexedDB へ移す
+const PENDING = 'nes-emu:pending-save:';
+
+export function saveSramNow(id: string, data: Uint8Array): void {
+  try {
+    let bin = '';
+    for (let i = 0; i < data.length; i++) bin += String.fromCharCode(data[i]);
+    localStorage.setItem(PENDING + id, btoa(bin));
+  } catch {
+    // 無視
+  }
+}
+
+function takePending(id: string): Uint8Array | null {
+  try {
+    const b64 = localStorage.getItem(PENDING + id);
+    if (b64 === null) return null;
+    return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+export async function loadSram(id: string): Promise<Uint8Array | null> {
+  const pending = takePending(id);
+  if (pending) {
+    // 閉じる直前の分のほうが新しい。IndexedDB へ移せたら localStorage から消す
+    if (await saveSram(id, pending)) {
+      try {
+        localStorage.removeItem(PENDING + id);
+      } catch {
+        // 無視
+      }
+    }
+    return pending;
+  }
+  try {
+    const data = await run<Uint8Array | undefined>('readonly', (s) => s.get(id), SAVES);
+    return data instanceof Uint8Array ? data : null;
   } catch {
     return null;
   }

@@ -5,6 +5,8 @@ import { Cpu } from './cpu';
 import { createMapper, type Mapper } from './mappers/mapper';
 import { Ppu } from './ppu';
 
+const IRQ_MAPPER = 4;
+
 export class Nes {
   cart: Cartridge;
   mapper: Mapper;
@@ -15,18 +17,27 @@ export class Nes {
 
   constructor(rom: Uint8Array) {
     this.cart = parseINes(rom);
-    this.mapper = createMapper(this.cart);
+    this.mapper = createMapper(this.cart, {
+      irq: (on) => this.setIrq(IRQ_MAPPER, on),
+      cpuCycles: () => this.cpu.cycles,
+      ppuDots: () => this.ppu.dots,
+    });
     this.ppu = new Ppu(this.mapper);
     this.bus = new NesBus(this.mapper, this.ppu);
     this.cpu = new Cpu(this.bus);
     this.apu = new Apu(
       (addr) => this.bus.read(addr),
       (cycles) => (this.cpu.stall += cycles),
-      (source, on) => (this.cpu.irqLine = on ? this.cpu.irqLine | source : this.cpu.irqLine & ~source),
+      (source, on) => this.setIrq(source, on),
     );
     this.bus.cpu = this.cpu;
     this.bus.apu = this.apu;
     this.cpu.powerOn();
+  }
+
+  /** IRQ 線は要因ごとのビットの OR（APU のフレーム・DMC、マッパー） */
+  private setIrq(source: number, on: boolean): void {
+    this.cpu.irqLine = on ? this.cpu.irqLine | source : this.cpu.irqLine & ~source;
   }
 
   reset(): void {

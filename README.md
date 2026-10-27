@@ -16,7 +16,7 @@ npm run build
 - [x] 段階3：コントローラー・タッチボタン … 十字キー（8 方向・指を滑らせて切り替え）、A/B（間を押すと同時押し）、SELECT/START。PC はキーボード
 - [x] 段階4：APU（音）… 矩形波 2・三角波・ノイズ・DMC、フレームカウンタと IRQ。blargg の apu_test 8 本すべて合格。Web Audio（AudioWorklet）で再生
 - [x] 段階5：PWA … ホーム画面に追加して全画面で起動、オフラインでも動く、前回の ROM を自動で読み込み、プレイ中は画面を消さない
-- [ ] 段階6：マッパー 1・2・4
+- [x] 段階6：マッパー 1（MMC1）・2（UxROM）・4（MMC3）… バッテリーバックアップのセーブにも対応。MMC1 を使う blargg のまとめ ROM と mmc3_test_2 に合格
 
 ## 操作
 | NES | タッチ | キーボード |
@@ -32,7 +32,7 @@ npm run build
    - Android（Chrome）：メニュー →「ホーム画面に追加」（または「アプリをインストール」）
 3. 一度開けば、あとはオフラインでも起動できる。新しい版を置くと画面の上に「更新」が出る
 
-ROM は端末の中（IndexedDB）にだけ保存し、どこにも送らない。アイコンは `python3 scripts/make-icons.py` で作り直せる。
+ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、どこにも送らない。セーブデータは ROM の中身ごとに分けて保存するので、ファイル名を変えても引き継がれる。アイコンは `python3 scripts/make-icons.py` で作り直せる。
 
 ## 音
 スマホのブラウザは、画面に触れるまで音を出せません。最初のタップ（ボタンでも画面でも）で音が出始めます。🔊 ボタンで消音できます（設定は保存）。
@@ -49,12 +49,14 @@ ROM は端末の中（IndexedDB）にだけ保存し、どこにも送らない�
 | `src/controller.ts` | 標準コントローラー（$4016/$4017） |
 | `src/input/` | タッチボタン（`touch.ts`）とキーボード（`keyboard.ts`） |
 | `src/main.ts` | 画面（canvas）と 60fps のループ、ROM の読み込み、PWA の更新のお知らせ |
-| `src/storage.ts` | 最後に遊んだ ROM の保存（IndexedDB） |
+| `src/storage.ts` | 最後に遊んだ ROM とセーブデータの保存（IndexedDB） |
 | `src/wakelock.ts` | プレイ中に画面を消さない（Screen Wake Lock） |
 | `vite.config.ts` | PWA の設定（manifest・Service Worker） |
 | `src/cartridge.ts` | iNES ヘッダーの読み込み |
-| `src/mappers/` | マッパー（今は 0 = NROM） |
+| `src/mappers/` | マッパー。`base.ts` が土台（PRG 8KB×4・CHR 1KB×8 の切り替え表）、`mapper0/1/2/4.ts` が各マッパー |
 | `test/nestest.test.ts` | nestest の自動モードを公式ログと突き合わせる（PPU のタイミングも） |
 | `test/ppu.test.ts` | blargg の PPU テスト（結果は画面の文字を読む。共通部分は `test/blargg.ts`） |
 | `test/apu.test.ts` | blargg の APU テスト |
+| `test/mappers.test.ts` | MMC1・MMC3 を使う blargg のテスト ROM |
+| `test/mapper-units.test.ts` | 各マッパーのバンク切り替え・IRQ を直接確かめる |
 | `test/sound.test.ts` | 出力波形から音の高さを測る（矩形波・三角波・ノイズ、ROM から鳴らした音） |

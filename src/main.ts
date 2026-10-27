@@ -4,7 +4,7 @@ import { KeyboardInput } from './input/keyboard';
 import { TouchInput } from './input/touch';
 import { Nes } from './nes';
 import { SCREEN_H, SCREEN_W } from './ppu';
-import { loadLastRom, saveLastRom } from './storage';
+import { loadLastRom, loadSram, romId, saveLastRom, saveSram, saveSramNow } from './storage';
 import { keepScreenOn } from './wakelock';
 
 const FRAME_MS = 1000 / 60.0988; // NTSC の NES のフレームレート
@@ -52,38 +52,86 @@ for (const type of ['pointerup', 'touchend', 'keydown', 'click']) {
   document.addEventListener(type, unlockAudio, { capture: true });
 }
 
-function startRom(name: string, data: Uint8Array): boolean {
+/** 遊んでいる ROM の ID（セーブデータの保存先） */
+let currentId: string | null = null;
+
+/**
+ * ROM を読み込んで動かし始める。セーブデータがあれば、ゲームが読む前に入れておく。
+ * 読み込めなければ null、読み込めたらセーブデータを入れたかどうかを返す
+ */
+async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: boolean } | null> {
+  await flushSave(); // 前の ROM のセーブを書き出しておく
+  let next: Nes;
   try {
-    nes = new Nes(data);
-    // PPU の画面バッファをそのまま ImageData として使う（コピーなし）
-    image = new ImageData(new Uint8ClampedArray(nes.ppu.frameBuffer.buffer), SCREEN_W, SCREEN_H);
-    message.textContent = '';
-    resetButton.disabled = false;
-    document.title = `${name.replace(/\.nes$/i, '')} - NES Emu`;
-    acc = 0;
-    keepScreenOn(true);
-    return true;
+    next = new Nes(data);
   } catch (e) {
     nes = null;
+    currentId = null;
     resetButton.disabled = true;
     ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
     message.textContent = e instanceof Error ? e.message : String(e);
     keepScreenOn(false);
-    return false;
+    return null;
   }
+  const id = await romId(data);
+  let loadedSave = false;
+  const ram = next.mapper.saveRam;
+  if (ram) {
+    const saved = await loadSram(id);
+    if (saved) {
+      ram.set(saved.subarray(0, ram.length));
+      loadedSave = true;
+    }
+    next.mapper.saveDirty = false;
+  }
+  nes = next;
+  currentId = id;
+  // PPU の画面バッファをそのまま ImageData として使う（コピーなし）
+  image = new ImageData(new Uint8ClampedArray(nes.ppu.frameBuffer.buffer), SCREEN_W, SCREEN_H);
+  message.textContent = '';
+  resetButton.disabled = false;
+  document.title = `${name.replace(/\.nes$/i, '')} - NES Emu`;
+  acc = 0;
+  keepScreenOn(true);
+  return { loadedSave };
 }
+
+/** バッテリーバックアップの RAM が変わっていれば保存する */
+async function flushSave(): Promise<void> {
+  const mapper = nes?.mapper;
+  if (!mapper?.saveRam || !mapper.saveDirty || !currentId) return;
+  mapper.saveDirty = false;
+  if (!(await saveSram(currentId, mapper.saveRam))) mapper.saveDirty = true;
+}
+// ゲームは何度かに分けて書くことが多いので、1 秒ごとにまとめて保存。アプリを閉じる・切り替えるときはすぐ保存
+setInterval(() => void flushSave(), 1000);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) void flushSave();
+});
+window.addEventListener('pagehide', () => {
+  const mapper = nes?.mapper;
+  if (mapper?.saveRam && mapper.saveDirty && currentId) {
+    saveSramNow(currentId, mapper.saveRam);
+    mapper.saveDirty = false;
+  }
+});
 
 romInput.addEventListener('change', async () => {
   const file = romInput.files?.[0];
   romInput.value = '';
   if (!file) return;
   const data = new Uint8Array(await file.arrayBuffer());
-  if (startRom(file.name, data)) void saveLastRom({ name: file.name, data });
+  const started = await startRom(file.name, data);
+  if (!started) return;
+  void saveLastRom({ name: file.name, data });
+  if (started.loadedSave) showToast('セーブデータを読み込みました');
 });
 
 // 前回の ROM があれば読み込んでおく（音は最初のタップで出始める）
-void loadLastRom().then((rom) => {
-  if (rom && !nes && startRom(rom.name, rom.data)) showToast(`前回の「${rom.name}」を読み込みました`);
+void loadLastRom().then(async (rom) => {
+  if (!rom || nes) return;
+  const started = await startRom(rom.name, rom.data);
+  if (started) showToast(`前回の「${rom.name}」を読み込みました${started.loadedSave ? '（セーブデータあり）' : ''}`);
 });
 
 // ---- お知らせ ----
