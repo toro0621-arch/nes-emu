@@ -132,9 +132,9 @@ header {
   position: absolute;
   right: calc(var(--unit) * 0.35);
   /* 十字キーの真ん中の高さにそろえる */
-  top: calc(50% - var(--unit) * 1.225);
-  width: calc(var(--unit) * 3.3);
-  height: calc(var(--unit) * 1.45);
+  top: calc(50% - var(--unit) * 1.45);
+  width: calc(var(--unit) * 3.05);
+  height: calc(var(--unit) * 1.9);
 }
 .round {
   position: absolute;
@@ -150,14 +150,14 @@ header {
   justify-content: center;
   box-shadow: 0 3px 0 #8f2a26;
 }
-/* 実機と同じく B が左・A が右に横並び（B を押したまま親指の腹で A も押せる） */
+/* B が左のちょい上、A が右のちょい下。近めに置いて、B を押したまま親指の腹で A も押せるように */
 .round[data-btn='B'] {
   left: 0;
   top: 0;
 }
 .round[data-btn='A'] {
   right: 0;
-  top: 0;
+  bottom: 0;
 }
 #sys {
   position: absolute;
@@ -269,8 +269,8 @@ html.landscape #dpad {
   top: calc(52% - var(--unit) * 1.5);
 }
 html.landscape #ab {
-  right: calc((var(--side) - var(--unit) * 3.3) / 2);
-  top: calc(52% - var(--unit) * 0.725);
+  right: calc((var(--side) - var(--unit) * 3.05) / 2);
+  top: calc(52% - var(--unit) * 0.95);
 }
 /* SELECT は十字キーの下、START は A/B の下 */
 html.landscape #sys {
