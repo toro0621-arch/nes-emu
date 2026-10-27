@@ -131,9 +131,10 @@ header {
 #ab {
   position: absolute;
   right: calc(var(--unit) * 0.35);
-  top: calc(50% - var(--unit) * 2);
+  /* 十字キーの真ん中の高さにそろえる */
+  top: calc(50% - var(--unit) * 1.225);
   width: calc(var(--unit) * 3.3);
-  height: calc(var(--unit) * 3);
+  height: calc(var(--unit) * 1.45);
 }
 .round {
   position: absolute;
@@ -149,14 +150,14 @@ header {
   justify-content: center;
   box-shadow: 0 3px 0 #8f2a26;
 }
-/* B は左下、A は右上（斜めに並べて親指 1 本で両方押せるように） */
+/* 実機と同じく B が左・A が右に横並び（B を押したまま親指の腹で A も押せる） */
 .round[data-btn='B'] {
   left: 0;
-  bottom: calc(var(--unit) * 0.2);
+  top: 0;
 }
 .round[data-btn='A'] {
   right: 0;
-  top: calc(var(--unit) * 0.2);
+  top: 0;
 }
 #sys {
   position: absolute;
@@ -223,19 +224,28 @@ html.rotated body {
   transform: translateX(100vw) rotate(90deg);
 }
 html.landscape body {
-  --head: 44px;
-  /* 画面の高さと幅、左右に空く幅 */
-  --screen-h: calc(var(--H) - var(--head) - var(--it) - var(--ib) - 8px);
+  /* 画面の高さと幅（高さいっぱい）、左右に空く幅 */
+  --screen-h: calc(var(--H) - var(--it) - var(--ib));
   --screen-w: calc(var(--screen-h) * 240 / 224);
   --side: calc((var(--W) - var(--screen-w)) / 2 - max(var(--il), var(--ir)));
 }
+/* 上のバーは左側の空きの上に重ねる（ボタンの領域より手前） */
 html.landscape header {
-  height: var(--head);
-  padding: 0 12px;
+  position: fixed;
+  z-index: 5;
+  top: calc(var(--it) + 6px);
+  left: calc(var(--il) + 6px);
+  width: calc(var(--side) - 12px);
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
 }
 html.landscape header .btn {
-  padding: 5px 12px;
-  font-size: 13px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+html.landscape #fps {
+  display: none;
 }
 html.landscape #screen-wrap {
   width: var(--screen-w);
@@ -246,7 +256,7 @@ html.landscape #screen-wrap {
 html.landscape #pad {
   --unit: min(calc(var(--H) * 0.15), 58px, calc(var(--side) / 3.8));
   position: fixed;
-  top: calc(var(--head) + var(--it));
+  top: var(--it);
   bottom: var(--ib);
   left: var(--il);
   right: var(--ir);
@@ -256,11 +266,11 @@ html.landscape #pad {
 }
 html.landscape #dpad {
   left: calc((var(--side) - var(--unit) * 3) / 2);
-  top: calc(50% - var(--unit) * 1.9);
+  top: calc(52% - var(--unit) * 1.5);
 }
 html.landscape #ab {
   right: calc((var(--side) - var(--unit) * 3.3) / 2);
-  top: calc(50% - var(--unit) * 1.9);
+  top: calc(52% - var(--unit) * 0.725);
 }
 /* SELECT は十字キーの下、START は A/B の下 */
 html.landscape #sys {
@@ -268,8 +278,8 @@ html.landscape #sys {
   justify-content: space-between;
   padding: 0 calc((var(--side) - var(--unit) * 1.1) / 2);
 }
-html.rotated #toast {
-  top: 52px;
+html.landscape #toast {
+  top: calc(var(--it) + 12px);
 }
 
 /* ---- お知らせ（更新・オフライン対応など） ---- */
