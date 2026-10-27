@@ -1,3 +1,4 @@
+import { AudioOutput } from './audio/output';
 import { KeyboardInput } from './input/keyboard';
 import { TouchInput } from './input/touch';
 import { Nes } from './nes';
@@ -12,12 +13,41 @@ const message = $('message');
 const fpsLabel = $('fps');
 const romInput = $<HTMLInputElement>('rom');
 const resetButton = $<HTMLButtonElement>('reset');
+const soundButton = $<HTMLButtonElement>('sound');
 
 const touch = new TouchInput($('pad'));
 const keyboard = new KeyboardInput();
 
 let nes: Nes | null = null;
 let image: ImageData | null = null;
+
+// ---- 音 ----
+const audio = new AudioOutput();
+const MUTE_KEY = 'nes-emu:muted';
+try {
+  audio.muted = localStorage.getItem(MUTE_KEY) === '1';
+} catch {
+  // 保存できない環境では毎回オン
+}
+const showSound = () => (soundButton.textContent = audio.muted ? '🔇' : '🔊');
+showSound();
+soundButton.addEventListener('click', () => {
+  audio.setMuted(!audio.muted);
+  showSound();
+  try {
+    localStorage.setItem(MUTE_KEY, audio.muted ? '1' : '0');
+  } catch {
+    // 無視
+  }
+});
+// スマホはユーザー操作の中でしか音を出し始められないので、操作のたびに開始（再開）を試みる。
+// タッチの pointerdown は「ユーザー操作」に数えられないため、指を離したときに行う
+const unlockAudio = () => {
+  if (!audio.running) void audio.start();
+};
+for (const type of ['pointerup', 'touchend', 'keydown', 'click']) {
+  document.addEventListener(type, unlockAudio, { capture: true });
+}
 
 romInput.addEventListener('change', async () => {
   const file = romInput.files?.[0];
@@ -60,7 +90,13 @@ function loop(now: number): void {
       frames++;
       ran = true;
     }
-    if (ran) ctx.putImageData(image, 0, 0);
+    if (ran) {
+      ctx.putImageData(image, 0, 0);
+      const samples = nes.apu.takeSamples();
+      audio.push(samples);
+      nes.apu.sampleRate = audio.sampleRate;
+      nes.apu.rateAdjust = audio.rateAdjust();
+    }
   }
   if (now - fpsTime >= 1000) {
     fpsLabel.textContent = nes ? `${Math.round((frames * 1000) / (now - fpsTime))} fps` : '';
@@ -70,3 +106,6 @@ function loop(now: number): void {
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+
+// 開発サーバーでだけ、動作確認用に中身を見られるようにする
+if (import.meta.env.DEV) Object.assign(window, { emu: { nes: () => nes, audio } });

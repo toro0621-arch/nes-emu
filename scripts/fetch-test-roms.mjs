@@ -14,6 +14,8 @@ const FILES = [
   ].map((n) => `ppu_vbl_nmi/rom_singles/${n}.nes`),
   ...['palette_ram', 'sprite_ram', 'vram_access', 'vbl_clear_time'].map((n) => `blargg_ppu_tests_2005.09.15b/${n}.nes`),
   'oam_read/oam_read.nes',
+  ...['1-len_ctr', '2-len_table', '3-irq_flag', '4-jitter', '5-len_timing', '6-irq_flag_timing', '7-dmc_basics', '8-dmc_rates']
+    .map((n) => `apu_test/rom_singles/${n}.nes`),
   ...['01.basics', '02.alignment', '03.corners', '04.flip', '05.left_clip', '06.right_edge', '07.screen_bottom', '08.double_height', '09.timing_basics', '10.timing_order', '11.edge_timing']
     .map((n) => `sprite_hit_tests_2005.10.05/${n}.nes`),
 ];

@@ -1,3 +1,4 @@
+import { Apu } from './apu';
 import { NesBus } from './bus';
 import { parseINes, type Cartridge } from './cartridge';
 import { Cpu } from './cpu';
@@ -9,6 +10,7 @@ export class Nes {
   mapper: Mapper;
   cpu: Cpu;
   ppu: Ppu;
+  apu: Apu;
   bus: NesBus;
 
   constructor(rom: Uint8Array) {
@@ -17,11 +19,18 @@ export class Nes {
     this.ppu = new Ppu(this.mapper);
     this.bus = new NesBus(this.mapper, this.ppu);
     this.cpu = new Cpu(this.bus);
+    this.apu = new Apu(
+      (addr) => this.bus.read(addr),
+      (cycles) => (this.cpu.stall += cycles),
+      (source, on) => (this.cpu.irqLine = on ? this.cpu.irqLine | source : this.cpu.irqLine & ~source),
+    );
     this.bus.cpu = this.cpu;
+    this.bus.apu = this.apu;
     this.cpu.powerOn();
   }
 
   reset(): void {
+    this.apu.write(0x4015, 0); // リセットで音は止まる
     this.cpu.reset();
   }
 

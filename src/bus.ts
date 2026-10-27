@@ -1,12 +1,14 @@
+import type { Apu } from './apu';
 import { Controller } from './controller';
 import type { Cpu, CpuBus } from './cpu';
 import type { Mapper } from './mappers/mapper';
 import type { Ppu } from './ppu';
 
-// CPU から見たメモリマップ。APU は後の段階でつなぐ
+// CPU から見たメモリマップ
 export class NesBus implements CpuBus {
   ram = new Uint8Array(0x800);
   cpu!: Cpu;
+  apu!: Apu;
   pads = [new Controller(), new Controller()];
 
   constructor(
@@ -20,7 +22,8 @@ export class NesBus implements CpuBus {
     // 上位ビットはデータバスの残り（直前に読んだアドレスの上位バイト $40）が見える
     if (addr === 0x4016) return 0x40 | this.pads[0].read();
     if (addr === 0x4017) return 0x40 | this.pads[1].read();
-    if (addr < 0x4020) return 0; // APU（未実装）
+    if (addr === 0x4015) return this.apu.readStatus();
+    if (addr < 0x4020) return 0x40; // 読めないレジスタ（データバスの残り）
     return this.mapper.cpuRead(addr);
   }
 
@@ -31,7 +34,8 @@ export class NesBus implements CpuBus {
     else if (addr === 0x4016) {
       this.pads[0].write(v);
       this.pads[1].write(v);
-    } else if (addr < 0x4020) return; // APU（未実装）
+    } else if (addr < 0x4018) this.apu.write(addr, v);
+    else if (addr < 0x4020) return; // テスト用の未使用レジスタ
     else this.mapper.cpuWrite(addr, v);
   }
 
@@ -42,6 +46,7 @@ export class NesBus implements CpuBus {
       ppu.tick();
       ppu.tick();
       ppu.tick();
+      this.apu.tick();
       this.sampleNmi();
     }
   }
@@ -53,6 +58,7 @@ export class NesBus implements CpuBus {
 
   tickAfterAccess(): void {
     this.ppu.tick();
+    this.apu.tick();
     this.sampleNmi();
   }
 
