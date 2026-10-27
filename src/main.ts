@@ -21,6 +21,40 @@ const resetButton = $<HTMLButtonElement>('reset');
 const soundButton = $<HTMLButtonElement>('sound');
 
 const touch = new TouchInput($('pad'));
+
+// ---- 横画面 ----
+// スマホを横にしたときと、「横画面」ボタンを押したとき（縦のままページを回す）に横向きのレイアウトにする
+const rotateButton = $<HTMLButtonElement>('rotate');
+const ROTATE_KEY = 'nes-emu:rotate';
+let wantRotate = false;
+try {
+  wantRotate = localStorage.getItem(ROTATE_KEY) === '1';
+} catch {
+  // 無視
+}
+const landscapeMq = matchMedia('(orientation: landscape) and (max-height: 600px)');
+const portraitMq = matchMedia('(orientation: portrait)');
+function applyLayout(): void {
+  // 本当に横になっているときは回さない
+  const rotated = wantRotate && portraitMq.matches;
+  const root = document.documentElement;
+  root.classList.toggle('rotated', rotated);
+  root.classList.toggle('landscape', rotated || landscapeMq.matches);
+  touch.rotated = rotated;
+  rotateButton.textContent = wantRotate ? '縦画面' : '横画面';
+}
+landscapeMq.addEventListener('change', applyLayout);
+portraitMq.addEventListener('change', applyLayout);
+rotateButton.addEventListener('click', () => {
+  wantRotate = !wantRotate;
+  try {
+    localStorage.setItem(ROTATE_KEY, wantRotate ? '1' : '0');
+  } catch {
+    // 無視
+  }
+  applyLayout();
+});
+applyLayout();
 const keyboard = new KeyboardInput();
 
 let nes: Nes | null = null;

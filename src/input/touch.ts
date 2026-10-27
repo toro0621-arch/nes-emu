@@ -19,6 +19,9 @@ export class TouchInput {
   private b: HTMLElement;
   private keys: [HTMLElement, number][];
 
+  /** ページ全体を 90° 回して表示しているか（画面上の向きを、ボタンの向きに直す） */
+  rotated = false;
+
   constructor(private root: HTMLElement) {
     const q = (sel: string) => root.querySelector<HTMLElement>(sel)!;
     this.dpad = q('#dpad');
@@ -55,8 +58,10 @@ export class TouchInput {
     // 十字キー（見た目より少し広く反応させる）
     const d = this.dpad.getBoundingClientRect();
     const r = d.width / 2;
-    const dx = x - (d.left + r);
-    const dy = y - (d.top + r);
+    let dx = x - (d.left + r);
+    let dy = y - (d.top + r);
+    // 時計回りに 90° 回して表示しているときは、画面の下がボタンの右
+    if (this.rotated) [dx, dy] = [dy, -dx];
     const dist = Math.hypot(dx, dy);
     if (dist < r * 1.3) {
       if (dist < r * 0.15) return 0; // 真ん中は遊び
