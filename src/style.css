@@ -246,7 +246,7 @@ html.landscape header .btn {
   font-size: 12px;
 }
 html.landscape #fps {
-  display: none;
+  font-size: 11px;
 }
 html.landscape #screen-wrap {
   width: var(--screen-w);
