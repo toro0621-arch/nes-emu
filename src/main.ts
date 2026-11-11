@@ -2,9 +2,8 @@ import { registerSW } from 'virtual:pwa-register';
 import { AudioOutput } from './audio/output';
 import { KeyboardInput } from './input/keyboard';
 import { TouchInput } from './input/touch';
-import { Nes } from './nes';
-import { SCREEN_H, SCREEN_W } from './ppu';
-import { loadState, saveState, type SaveState } from './savestate';
+import { createMachine, type Machine } from './machine';
+import type { SaveState } from './savestate';
 import {
   deleteLibrary,
   getState,
@@ -22,8 +21,6 @@ import {
 import { keepScreenOn } from './wakelock';
 
 const FRAME_MS = 1000 / 60.0988; // NTSC の NES のフレームレート
-/** 画面のふちを切り落とす幅（canvas は 240×224） */
-const CROP = 8;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('screen');
@@ -71,8 +68,27 @@ rotateButton.addEventListener('click', () => {
 applyLayout();
 const keyboard = new KeyboardInput();
 
-let nes: Nes | null = null;
+let machine: Machine | null = null;
 let image: ImageData | null = null;
+
+/** 本体の画面バッファを canvas に描けるようにし、画面の大きさ（縦横比）を合わせる */
+function bindScreen(m: Machine): void {
+  // 画面バッファをそのまま ImageData として使う（コピーなし）
+  image = new ImageData(new Uint8ClampedArray(m.frameBuffer.buffer), m.width, m.height);
+  const w = m.width - m.crop * 2;
+  const h = m.height - m.crop * 2;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  const root = document.documentElement.style;
+  root.setProperty('--sw', String(w));
+  root.setProperty('--sh', String(h));
+  document.documentElement.dataset.system = m.system;
+}
+
+/** ファイル名から拡張子を取る */
+const baseName = (name: string) => name.replace(/\.(nes|gbc?)$/i, '');
 
 // ---- 音 ----
 const audio = new AudioOutput();
@@ -113,41 +129,41 @@ let currentRom: { name: string; data: Uint8Array } | null = null;
 async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: boolean } | null> {
   if (currentRom && currentRom.data === data) return { loadedSave: false };
   await flushSave(); // 前の ROM のセーブを書き出しておく
-  let next: Nes;
+  let next: Machine;
   try {
-    next = new Nes(data);
+    next = createMachine(data);
   } catch (e) {
-    nes = null;
+    machine = null;
     currentId = null;
     currentRom = null;
     resetButton.disabled = true;
-    ctx.clearRect(0, 0, SCREEN_W, SCREEN_H);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     message.textContent = e instanceof Error ? e.message : String(e);
     keepScreenOn(false);
     return null;
   }
   const id = await romId(data);
   let loadedSave = false;
-  const ram = next.mapper.saveRam;
+  const ram = next.saveRam;
   if (ram) {
     const saved = await loadSram(id);
     if (saved) {
       ram.set(saved.subarray(0, ram.length));
       loadedSave = true;
     }
-    next.mapper.saveDirty = false;
+    next.afterSaveLoaded();
+    next.saveDirty = false;
   }
-  nes = next;
+  machine = next;
   currentId = id;
   currentRom = { name, data };
   // ゲーム一覧に入れる（最後に遊んだ時刻を更新）と、次に開いたときに読み込む ROM として覚える
   void putLibrary({ id, name, data, lastPlayed: Date.now() });
   void saveLastRom({ name, data });
-  // PPU の画面バッファをそのまま ImageData として使う（コピーなし）
-  image = new ImageData(new Uint8ClampedArray(nes.ppu.frameBuffer.buffer), SCREEN_W, SCREEN_H);
+  bindScreen(next);
   message.textContent = '';
   resetButton.disabled = false;
-  document.title = `${name.replace(/\.nes$/i, '')} - NES Emu`;
+  document.title = `${baseName(name)} - NES Emu`;
   acc = 0;
   keepScreenOn(true);
   return { loadedSave };
@@ -155,7 +171,7 @@ async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: b
 
 /** バッテリーバックアップの RAM が変わっていれば保存する */
 async function flushSave(): Promise<void> {
-  const mapper = nes?.mapper;
+  const mapper = machine;
   if (!mapper?.saveRam || !mapper.saveDirty || !currentId) return;
   mapper.saveDirty = false;
   if (!(await saveSram(currentId, mapper.saveRam))) mapper.saveDirty = true;
@@ -166,7 +182,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) void flushSave();
 });
 window.addEventListener('pagehide', () => {
-  const mapper = nes?.mapper;
+  const mapper = machine;
   if (mapper?.saveRam && mapper.saveDirty && currentId) {
     saveSramNow(currentId, mapper.saveRam);
     mapper.saveDirty = false;
@@ -186,7 +202,7 @@ romInput.addEventListener('change', async () => {
 
 // 前回の ROM があれば読み込んでおく（音は最初のタップで出始める）
 void loadLastRom().then(async (rom) => {
-  if (!rom || nes) return;
+  if (!rom || machine) return;
   // （ゲーム一覧ができる前に遊んでいた ROM も、ここで一覧に入る）
   const started = await startRom(rom.name, rom.data);
   if (started) showToast(`前回の「${rom.name}」を読み込みました${started.loadedSave ? '（セーブデータあり）' : ''}`);
@@ -219,7 +235,10 @@ const updateSW = registerSW({
 });
 
 resetButton.addEventListener('click', () => {
-  nes?.reset();
+  if (machine) {
+    machine.reset();
+    bindScreen(machine);
+  }
   closeMenu();
 });
 
@@ -294,7 +313,7 @@ function button(label: string, run: () => void, className = 'btn'): HTMLButtonEl
 async function renderSlots(): Promise<void> {
   slotsEl.replaceChildren();
   const id = currentId;
-  if (!nes || !id) {
+  if (!machine || !id) {
     slotsHint.textContent = 'ゲームを選ぶと使えます';
     return;
   }
@@ -324,22 +343,22 @@ async function renderSlots(): Promise<void> {
 }
 
 async function doSave(slot: number): Promise<void> {
-  if (!nes || !currentId) return;
+  if (!machine || !currentId) return;
   const ok = await putState(currentId, slot, {
     time: Date.now(),
     thumb: canvas.toDataURL('image/png'),
-    state: saveState(nes),
+    state: machine.saveState(),
   });
   showToast(ok ? `スロット ${slot} にセーブしました` : 'セーブできませんでした（保存領域が使えません）');
   await renderSlots();
 }
 
 async function doLoad(slot: number): Promise<void> {
-  if (!nes || !currentId) return;
+  if (!machine || !currentId) return;
   const saved = await getState(currentId, slot);
   if (!saved) return;
   try {
-    loadState(nes, saved.state as SaveState);
+    machine.loadState(saved.state as SaveState);
   } catch (e) {
     showToast(e instanceof Error ? e.message : 'ロードできませんでした');
     return;
@@ -367,7 +386,7 @@ function libraryRow(entry: LibraryEntry): HTMLLIElement {
   const play = document.createElement('button');
   play.className = 'btn play';
   const name = document.createElement('span');
-  name.textContent = entry.name.replace(/\.nes$/i, '');
+  name.textContent = baseName(entry.name);
   const when = document.createElement('small');
   when.textContent = playing ? 'プレイ中' : `最後に遊んだ日 ${formatTime(entry.lastPlayed)}`;
   play.append(name, when);
@@ -411,29 +430,28 @@ let fpsTime = last;
 function loop(now: number): void {
   const dt = now - last;
   last = now;
-  if (nes && image && !document.hidden && !menuOpen) {
+  if (machine && image && !document.hidden && !menuOpen) {
     const speed = fastForward ? FF_SPEED : 1;
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);
     let ran = false;
     // 半フレーム分たまったら 1 フレーム進める（60Hz 画面で毎回 1 フレームになるように）
     while (acc >= FRAME_MS / 2) {
-      nes.bus.pads[0].buttons = touch.read() | keyboard.read();
-      nes.runFrame();
+      machine.setButtons(touch.read() | keyboard.read());
+      machine.runFrame();
       acc -= FRAME_MS;
       frames++;
       ran = true;
     }
     if (ran) {
       // 上下左右の 8 ドットは、実機のテレビでも見えない部分（左端の線やスクロールのちらつきが出る）なので切り落とす
-      ctx.putImageData(image, -CROP, -CROP);
-      const samples = nes.apu.takeSamples();
+      ctx.putImageData(image, -machine.crop, -machine.crop);
+      const samples = machine.takeSamples();
       audio.push(speed > 1 ? decimate(samples, speed) : samples);
-      nes.apu.sampleRate = audio.sampleRate;
-      nes.apu.rateAdjust = audio.rateAdjust();
+      machine.setAudio(audio.sampleRate, audio.rateAdjust());
     }
   }
   if (now - fpsTime >= 1000) {
-    fpsLabel.textContent = nes ? `${Math.round((frames * 1000) / (now - fpsTime))} fps` : '';
+    fpsLabel.textContent = machine ? `${Math.round((frames * 1000) / (now - fpsTime))} fps` : '';
     frames = 0;
     fpsTime = now;
   }
@@ -442,4 +460,4 @@ function loop(now: number): void {
 requestAnimationFrame(loop);
 
 // 開発サーバーでだけ、動作確認用に中身を見られるようにする
-if (import.meta.env.DEV) Object.assign(window, { emu: { nes: () => nes, audio } });
+if (import.meta.env.DEV) Object.assign(window, { emu: { machine: () => machine, audio } });

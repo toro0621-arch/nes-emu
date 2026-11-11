@@ -54,7 +54,7 @@ header {
   width: 100%;
   max-width: 512px;
   margin: 0 auto;
-  aspect-ratio: 240 / 224;
+  aspect-ratio: var(--sw, 240) / var(--sh, 224);
   background: #000;
 }
 #screen {
@@ -226,7 +226,7 @@ html.rotated body {
 html.landscape body {
   /* 画面の高さと幅（高さいっぱい）、左右に空く幅 */
   --screen-h: calc(var(--H) - var(--it) - var(--ib));
-  --screen-w: calc(var(--screen-h) * 240 / 224);
+  --screen-w: calc(var(--screen-h) * var(--sw, 240) / var(--sh, 224));
   --side: calc((var(--W) - var(--screen-w)) / 2 - max(var(--il), var(--ir)));
 }
 /* 上のバーは左側の空きの上に重ねる（ボタンの領域より手前） */
@@ -404,10 +404,10 @@ html.landscape .menu-panel {
 }
 .slot .thumb {
   width: 72px;
-  aspect-ratio: 240 / 224;
+  aspect-ratio: var(--sw, 240) / var(--sh, 224);
   border-radius: 4px;
   background: #000;
-  object-fit: cover;
+  object-fit: contain;
   image-rendering: pixelated;
   border: 1px solid #34344a;
 }

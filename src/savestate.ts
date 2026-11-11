@@ -9,6 +9,8 @@ export const STATE_VERSION = 1;
 
 export interface SaveState {
   version: number;
+  /** 本体（ないものはファミコン） */
+  system?: 'nes' | 'gb';
   mapper: number;
   parts: Record<string, unknown>;
 }
@@ -25,7 +27,18 @@ function isTyped(v: unknown): v is Uint8Array | Uint16Array | Uint32Array | Floa
 export function saveState(nes: Nes): SaveState {
   const skip = new Set<unknown>([nes.cpu, nes.ppu, nes.apu, nes.bus, nes.mapper, nes.cart, nes.cart.prg]);
   if (!nes.cart.chrRam) skip.add(nes.cart.chr);
+  return captureState('nes', nes.cart.mapper, partsOf(nes), skip);
+}
 
+/**
+ * 部品（CPU・画面・音など）のフィールドを写し取る。skip にあるもの（ほかの部品・ROM）は写さない
+ */
+export function captureState(
+  system: 'nes' | 'gb',
+  mapper: number,
+  partsIn: Record<string, object>,
+  skip: Set<unknown>,
+): SaveState {
   const snap = (v: unknown, depth: number): unknown => {
     if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' || v === null) return v;
     if (isTyped(v)) return v.slice();
@@ -42,7 +55,7 @@ export function saveState(nes: Nes): SaveState {
   };
 
   const parts: Record<string, unknown> = {};
-  for (const [name, part] of Object.entries(partsOf(nes))) {
+  for (const [name, part] of Object.entries(partsIn)) {
     const out: Obj = {};
     for (const [k, x] of Object.entries(part as unknown as Obj)) {
       if (SKIP_KEYS.has(k) || typeof x === 'function' || x === undefined || skip.has(x)) continue;
@@ -50,13 +63,19 @@ export function saveState(nes: Nes): SaveState {
     }
     parts[name] = out;
   }
-  return { version: STATE_VERSION, mapper: nes.cart.mapper, parts };
+  return { version: STATE_VERSION, system, mapper, parts };
 }
 
 /** 書き戻す。形式やマッパーが合わなければ例外 */
 export function loadState(nes: Nes, state: SaveState): void {
+  applyState(state, 'nes', nes.cart.mapper, partsOf(nes));
+  // 読み込んだバッテリー RAM もセーブデータとして保存し直す
+  nes.mapper.saveDirty = nes.mapper.saveRam !== null;
+}
+
+export function applyState(state: SaveState, system: 'nes' | 'gb', mapper: number, parts: Record<string, object>): void {
   if (!state || state.version !== STATE_VERSION) throw new Error('このセーブは古い形式なので読み込めません');
-  if (state.mapper !== nes.cart.mapper) throw new Error('別のゲームのセーブです');
+  if ((state.system ?? 'nes') !== system || state.mapper !== mapper) throw new Error('別のゲームのセーブです');
 
   // 今あるオブジェクトの中身を書き換える（クラスのメソッドはそのまま使えるように）
   const restore = (target: Obj, saved: Obj): void => {
@@ -84,19 +103,16 @@ export function loadState(nes: Nes, state: SaveState): void {
     }
   };
 
-  const parts = partsOf(nes);
   for (const [name, saved] of Object.entries(state.parts)) {
-    const part = parts[name as keyof typeof parts];
+    const part = parts[name];
     if (part) restore(part as unknown as Obj, saved as Obj);
   }
-  // 読み込んだバッテリー RAM もセーブデータとして保存し直す
-  nes.mapper.saveDirty = nes.mapper.saveRam !== null;
 }
 
 function structuredCloneArray(v: unknown[]): unknown[] {
   return v.map((x) => (Array.isArray(x) ? structuredCloneArray(x) : x !== null && typeof x === 'object' ? { ...(x as Obj) } : x));
 }
 
-function partsOf(nes: Nes) {
+function partsOf(nes: Nes): Record<string, object> {
   return { cpu: nes.cpu, ppu: nes.ppu, apu: nes.apu, bus: nes.bus, mapper: nes.mapper };
 }

@@ -2,3 +2,5 @@ node_modules
 dist
 test/roms
 *.nes
+*.gb
+*.gbc

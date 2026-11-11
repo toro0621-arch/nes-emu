@@ -21,6 +21,8 @@ npm run build
 
 - [x] 追加：どこでもセーブ（ゲームごとに 3 スロット、画面のサムネイル付き）、ゲーム一覧（読み込んだ ROM を端末に覚えておく）、早送り（3 倍速）、PPUMASK の色強調
 
+- [x] ゲームボーイ・ゲームボーイカラー（`src/gb/`）。同じアプリで .gb / .gbc を読み込むと自動で切り替わる。MBC1・2・3（時計つき）・5、倍速モード、HDMA に対応。blargg の cpu_instrs・instr_timing・mem_timing・mem_timing-2・halt_bug・interrupt_time に合格、dmg_sound は 01〜07 に合格（08〜12 は波形メモリと電源の細かい癖）
+
 ### 対応マッパー
 
 | 番号 | チップ | 主なソフト |
@@ -78,6 +80,8 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `src/wakelock.ts` | プレイ中に画面を消さない（Screen Wake Lock） |
 | `vite.config.ts` | PWA の設定（manifest・Service Worker） |
 | `src/cartridge.ts` | iNES ヘッダーの読み込み |
+| `src/machine.ts` | ファミコンとゲームボーイを、アプリから同じように扱うための窓口（ROM の中身から本体を決める） |
+| `src/gb/` | ゲームボーイ。`cpu.ts`（SM83。読み書き 1 回ごとに 1 M サイクル進める）、`gb.ts`（メモリ・タイマー・DMA・ボタン・倍速）、`ppu.ts`（画面。ライン単位で描く）、`apu.ts`（音）、`cart.ts`（MBC・時計） |
 | `src/savestate.ts` | どこでもセーブ。CPU・PPU・APU・バス・マッパーのフィールドをたどって写し取り、書き戻す（ROM・関数・部品どうしの参照は写さない） |
 | `src/mappers/` | マッパー。`base.ts` が土台（PRG 8KB×4・CHR 1KB×8 の切り替え表と、CPU サイクル・ネームテーブル・走査線・拡張音源のフック）、`mapper.ts` が番号→実装の表。`mapper0/1/2/4.ts`、`discrete.ts`（汎用ロジック）、`mmc2.ts`、`mmc3x.ts`、`mmc5.ts`、`vrc.ts`、`namco108.ts`、`namco163.ts`、`sunsoft.ts`、`bandai.ts`、`misc.ts`（ジャレコ・アイレム・タイトー） |
 | `test/nestest.test.ts` | nestest の自動モードを公式ログと突き合わせる（PPU のタイミングも） |
@@ -85,6 +89,7 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `test/apu.test.ts` | blargg の APU テスト |
 | `test/mappers.test.ts` | MMC1・MMC3 を使う blargg のテスト ROM |
 | `test/mapper-units.test.ts` | 各マッパーのバンク切り替え・IRQ を直接確かめる |
+| `test/gb.test.ts` | ゲームボーイ：blargg のテスト ROM、画面（スプライト・ウィンドウ・カラーのパレット）、MBC、どこでもセーブ |
 | `test/savestate.test.ts` | セーブしたところから動かし直すと、画面・RAM・音が同じになるか |
 | `test/mapper-more.test.ts` | あとから足したマッパー（VRC・ナムコ・サンソフト・バンダイの EEPROM・MMC5 など） |
 | `test/sound.test.ts` | 出力波形から音の高さを測る（矩形波・三角波・ノイズ、ROM から鳴らした音） |

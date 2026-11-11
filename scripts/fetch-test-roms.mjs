@@ -1,4 +1,5 @@
 // テスト用ROM（nestest・blargg のテスト）を test/roms/ にダウンロードする。リポジトリには含めない。
+// ゲームボーイのテスト ROM は test/roms/gb/ に置く
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,12 +30,27 @@ const FILES = [
     .map((n) => `sprite_hit_tests_2005.10.05/${n}.nes`),
 ];
 
-mkdirSync(dir, { recursive: true });
-for (const f of FILES) {
-  const path = join(dir, f.split('/').pop());
-  if (existsSync(path)) continue;
-  const res = await fetch(BASE + f);
-  if (!res.ok) throw new Error(`${f} のダウンロードに失敗: ${res.status}`);
+const GB_BASE = 'https://raw.githubusercontent.com/retrio/gb-test-roms/master/';
+/** [元の場所, 保存する名前] */
+const GB_FILES = [
+  ['cpu_instrs/cpu_instrs.gb', 'cpu_instrs.gb'],
+  ['instr_timing/instr_timing.gb', 'instr_timing.gb'],
+  ['mem_timing/mem_timing.gb', 'mem_timing.gb'],
+  ['mem_timing-2/mem_timing.gb', 'mem_timing-2.gb'],
+  ['halt_bug.gb', 'halt_bug.gb'],
+  ['interrupt_time/interrupt_time.gb', 'interrupt_time.gb'],
+  ['dmg_sound/dmg_sound.gb', 'dmg_sound.gb'],
+  ['cgb_sound/cgb_sound.gb', 'cgb_sound.gb'],
+];
+
+async function download(url, path) {
+  if (existsSync(path)) return;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} のダウンロードに失敗: ${res.status}`);
   writeFileSync(path, Buffer.from(await res.arrayBuffer()));
-  console.log(`downloaded ${f}`);
+  console.log(`downloaded ${url}`);
 }
+
+mkdirSync(join(dir, 'gb'), { recursive: true });
+for (const f of FILES) await download(BASE + f, join(dir, f.split('/').pop()));
+for (const [f, name] of GB_FILES) await download(GB_BASE + f, join(dir, 'gb', name));
