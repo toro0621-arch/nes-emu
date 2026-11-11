@@ -35,8 +35,10 @@ export class WsDisplay {
   private spr = new Uint32Array(WS_W);
   private sprOn = new Uint8Array(WS_W); // 0 = なし、1 = SCR2 の下、2 = SCR2 の上
   private done = new Uint8Array(WS_W);
-  /** このラインで使う色（パレット 16 × 色 16） */
+  /** 使う色（パレット 16 × 色 16）。パレットが書き換えられたら作り直す */
   private pal = new Uint32Array(256);
+  palDirty = true;
+  private row = new Uint8Array(8);
 
   constructor(
     private ram: Uint8Array,
@@ -68,64 +70,74 @@ export class WsDisplay {
     return MONO[shade];
   }
 
-  /** タイルの 1 点の色番号（0〜3 または 0〜15） */
-  private pixel(tile: number, x: number, y: number): number {
-    const io = this.io;
+  /** タイル 1 行（8 点）の色番号を row に入れる */
+  private tileRow(tile: number, fy: number, row: Uint8Array): void {
     const ram = this.ram;
-    const mode = io[0x60];
+    const mode = this.io[0x60];
     if (!(mode & 0x40)) {
-      // 2 ビット
       if (mode & 0x20 && mode & 0x80) {
-        // パック（1 バイトに 4 点）
-        const b = ram[(0x2000 + tile * 16 + y * 2 + (x >> 2)) & 0xffff];
-        return (b >> (6 - (x & 3) * 2)) & 3;
+        const a = (0x2000 + tile * 16 + fy * 2) & 0xffff;
+        for (let x = 0; x < 8; x++) row[x] = (ram[a + (x >> 2)] >> (6 - (x & 3) * 2)) & 3;
+        return;
       }
-      const a = (0x2000 + tile * 16 + y * 2) & 0xffff;
-      const bit = 7 - x;
-      return ((ram[a] >> bit) & 1) | (((ram[a + 1] >> bit) & 1) << 1);
+      const a = (0x2000 + tile * 16 + fy * 2) & 0xffff;
+      const p0 = ram[a];
+      const p1 = ram[a + 1];
+      for (let x = 0; x < 8; x++) {
+        const bit = 7 - x;
+        row[x] = ((p0 >> bit) & 1) | (((p1 >> bit) & 1) << 1);
+      }
+      return;
     }
-    const a = (0x4000 + tile * 32 + y * 4) & 0xffff;
+    const a = (0x4000 + tile * 32 + fy * 4) & 0xffff;
     if (mode & 0x20) {
-      // 4 ビット・パック（1 バイトに 2 点、上位が左）
-      const b = ram[a + (x >> 1)];
-      return x & 1 ? b & 15 : b >> 4;
+      for (let x = 0; x < 8; x += 2) {
+        const v = ram[a + (x >> 1)];
+        row[x] = v >> 4;
+        row[x + 1] = v & 15;
+      }
+      return;
     }
-    const bit = 7 - x;
-    return (
-      ((ram[a] >> bit) & 1) |
-      (((ram[a + 1] >> bit) & 1) << 1) |
-      (((ram[a + 2] >> bit) & 1) << 2) |
-      (((ram[a + 3] >> bit) & 1) << 3)
-    );
-  }
-
-  /** 色番号 0 が透明か（4 ビットはいつも、2 ビットはパレット 4〜7・12〜15 だけ） */
-  private transparent(pal: number, idx: number): boolean {
-    if (idx !== 0) return false;
-    return (this.io[0x60] & 0x40) !== 0 || (pal & 4) !== 0;
+    const p0 = ram[a];
+    const p1 = ram[a + 1];
+    const p2 = ram[a + 2];
+    const p3 = ram[a + 3];
+    for (let x = 0; x < 8; x++) {
+      const bit = 7 - x;
+      row[x] = ((p0 >> bit) & 1) | (((p1 >> bit) & 1) << 1) | (((p2 >> bit) & 1) << 2) | (((p3 >> bit) & 1) << 3);
+    }
   }
 
   private layer(mapBase: number, sx: number, sy: number, line: number, out: Uint32Array, on: Uint8Array): void {
     const ram = this.ram;
     const color = (this.io[0x60] & 0x80) !== 0;
+    const bpp4 = (this.io[0x60] & 0x40) !== 0;
     const y = (line + sy) & 0xff;
     const ty = y >> 3;
-    for (let x = 0; x < WS_W; x++) {
-      const px = (x + sx) & 0xff;
+    const row = this.row;
+    const pals = this.pal;
+    let x = 0;
+    let px = sx & 0xff;
+    while (x < WS_W) {
+      // タイル 1 枚分をまとめて読む
       const ea = mapBase + (ty * 32 + (px >> 3)) * 2;
       const e = ram[ea & 0xffff] | (ram[(ea + 1) & 0xffff] << 8);
       let tile = e & 0x1ff;
       if (color && e & 0x2000) tile |= 0x200;
       const pal = (e >> 9) & 15;
-      const fx = e & 0x4000 ? 7 - (px & 7) : px & 7;
-      const fy = e & 0x8000 ? 7 - (y & 7) : y & 7;
-      const idx = this.pixel(tile, fx, fy);
-      if (this.transparent(pal, idx)) {
-        on[x] = 0;
-        continue;
+      this.tileRow(tile, e & 0x8000 ? 7 - (y & 7) : y & 7, row);
+      const hflip = (e & 0x4000) !== 0;
+      const clear0 = bpp4 || (pal & 4) !== 0; // 色 0 が透明か
+      const base = pal * 16;
+      for (let fx = px & 7; fx < 8 && x < WS_W; fx++, x++, px = (px + 1) & 0xff) {
+        const idx = row[hflip ? 7 - fx : fx];
+        if (idx === 0 && clear0) {
+          on[x] = 0;
+          continue;
+        }
+        on[x] = 1;
+        out[x] = pals[base + idx];
       }
-      on[x] = 1;
-      out[x] = this.pal[pal * 16 + idx];
     }
   }
 
@@ -140,8 +152,11 @@ export class WsDisplay {
     }
     const color = (io[0x60] & 0x80) !== 0;
     const ctrl = io[0x00];
-    const n = color ? 16 : 4;
-    for (let p = 0; p < 16; p++) for (let i = 0; i < n; i++) this.pal[p * 16 + i] = this.colorOf(p, i);
+    if (this.palDirty) {
+      this.palDirty = false;
+      const n = color ? 16 : 4;
+      for (let p = 0; p < 16; p++) for (let i = 0; i < n; i++) this.pal[p * 16 + i] = this.colorOf(p, i);
+    }
     const back = color ? this.colorOf((io[0x01] >> 4) & 15, io[0x01] & 15) : MONO[(io[0x1c + ((io[0x01] & 7) >> 1)] >> ((io[0x01] & 1) * 4)) & 15];
     const mapMask = color ? 0x0f : 0x07;
     const map1 = (io[0x07] & mapMask) << 11;
@@ -209,6 +224,9 @@ export class WsDisplay {
       const outsideOnly = (e & 0x1000) !== 0;
       const prio = e & 0x2000 ? 2 : 1;
       const fy = e & 0x8000 ? 7 - dy : dy;
+      const row = this.row;
+      this.tileRow(tile, fy, row);
+      const clear0 = (this.io[0x60] & 0x40) !== 0 || (pal & 4) !== 0;
       for (let px = 0; px < 8; px++) {
         const x = (sx + px) & 0xff;
         if (x >= WS_W || done[x]) continue;
@@ -216,9 +234,8 @@ export class WsDisplay {
           const inside = x >= wx0 && x <= wx1 && line >= wy0 && line <= wy1;
           if (inside === outsideOnly) continue;
         }
-        const fx = e & 0x4000 ? 7 - px : px;
-        const idx = this.pixel(tile, fx, fy);
-        if (this.transparent(pal, idx)) continue;
+        const idx = row[e & 0x4000 ? 7 - px : px];
+        if (idx === 0 && clear0) continue;
         done[x] = 1;
         this.sprOn[x] = prio;
         this.spr[x] = this.pal[pal * 16 + idx];

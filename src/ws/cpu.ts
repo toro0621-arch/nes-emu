@@ -117,12 +117,14 @@ export class V30MZ {
     return this.bus.read8(((seg << 4) + (off & 0xffff)) & 0xfffff);
   }
   private rd16(seg: number, off: number): number {
+    if (off & 1) this.cycles++; // 奇数番地の 16 ビットは 1 クロック余分
     return this.rd8(seg, off) | (this.rd8(seg, off + 1) << 8);
   }
   private wr8(seg: number, off: number, v: number): void {
     this.bus.write8(((seg << 4) + (off & 0xffff)) & 0xfffff, v & 0xff);
   }
   private wr16(seg: number, off: number, v: number): void {
+    if (off & 1) this.cycles++;
     this.wr8(seg, off, v);
     this.wr8(seg, off + 1, v >> 8);
   }
@@ -1049,7 +1051,7 @@ export class V30MZ {
         return this.jcc(r[CX] === 0);
       case 0xe4:
         this.setR8(0, this.bus.in8(this.fetch8()));
-        this.cycles += 6;
+        this.cycles += 7;
         return;
       case 0xe5: {
         const p = this.fetch8();

@@ -124,6 +124,8 @@ export class Ws implements WsCpuBus {
   readonly rom: Uint8Array;
   private readonly romMask: number;
   readonly header: WsHeader;
+  /** カラー本体として動かすか（白黒専用のソフトは白黒の本体として動かす） */
+  readonly color: boolean;
   readonly cpu: V30MZ;
   readonly display: WsDisplay;
   readonly sound: WsSound;
@@ -161,6 +163,7 @@ export class Ws implements WsCpuBus {
     this.rom = rom;
     this.romMask = size - 1;
     this.header = parseWsHeader(rom);
+    this.color = this.header.color;
     const st = this.header.saveType;
     const sramSize = { 0x01: 0x8000, 0x02: 0x8000, 0x03: 0x20000, 0x04: 0x40000, 0x05: 0x80000 }[st] ?? 0;
     const eepSize = { 0x10: 128, 0x20: 2048, 0x50: 1024 }[st] ?? 0;
@@ -183,7 +186,7 @@ export class Ws implements WsCpuBus {
     io[0x14] = 1; // 画面オン
     io[0x16] = 158;
     io[0x17] = 155;
-    io[0xa0] = 0x87;
+    io[0xa0] = this.color ? 0x87 : 0x85;
     this.cpu.reset();
   }
 
@@ -201,7 +204,8 @@ export class Ws implements WsCpuBus {
   read8(a: number): number {
     switch (a >> 16) {
       case 0:
-        return this.ram[a];
+        // 白黒の本体の RAM は 16KB だけ
+        return this.color || a < 0x4000 ? this.ram[a] : 0x90;
       case 1:
         if (!this.sram) return 0xff;
         return this.sram[((this.io[0xc1] << 16) | (a & 0xffff)) & (this.sram.length - 1)];
@@ -217,7 +221,10 @@ export class Ws implements WsCpuBus {
   write8(a: number, v: number): void {
     const seg = a >> 16;
     if (seg === 0) {
-      this.ram[a] = v;
+      if (this.color || a < 0x4000) {
+        this.ram[a] = v;
+        if (a >= 0xfe00) this.display.palDirty = true; // カラーのパレット
+      }
     } else if (seg === 1 && this.sram) {
       this.sram[((this.io[0xc1] << 16) | (a & 0xffff)) & (this.sram.length - 1)] = v;
       this.saveDirty = true;
@@ -237,7 +244,7 @@ export class Ws implements WsCpuBus {
       case 0x91:
         return io[0x91] | 0x80; // ヘッドホンをつないでいる（ステレオ）
       case 0xa0:
-        return 0x87;
+        return this.color ? 0x87 : 0x85; // bit1 = カラー本体
       case 0xa8:
         return this.hTimer & 0xff;
       case 0xa9:
@@ -285,10 +292,12 @@ export class Ws implements WsCpuBus {
       case 0x02:
         return; // 読み出し専用
       case 0x48:
+        if (!this.color) return;
         io[p] = v;
         if (v & 0x80) this.gdma();
         return;
       case 0x52:
+        if (!this.color) return;
         io[p] = v;
         if (v & 0x80) {
           this.sdmaSrc = io[0x4a] | (io[0x4b] << 8) | ((io[0x4c] & 0x0f) << 16);
@@ -358,7 +367,10 @@ export class Ws implements WsCpuBus {
         io[p] = v;
         return;
     }
+    // 白黒の本体にはカラーの機能（$40〜$6F の多く）がない
+    if (!this.color && p >= 0x40 && p < 0x70) return;
     io[p] = v;
+    if ((p >= 0x1c && p < 0x40) || p === 0x60 || p === 0x01) this.display.palDirty = true;
   }
 
   /** カラーの汎用 DMA（すぐに転送して、その分 CPU を止める） */
@@ -376,6 +388,7 @@ export class Ws implements WsCpuBus {
       dst = (dst + step) & 0xffff;
       len -= 2;
     }
+    this.display.palDirty = true;
     io[0x40] = src & 0xff;
     io[0x41] = (src >> 8) & 0xff;
     io[0x42] = src >> 16;

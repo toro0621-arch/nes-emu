@@ -6,6 +6,7 @@ import { AUTO_ID, GB_PALETTES, MONO_ID, autoPalette } from './gb/palettes';
 import { DMG_COLORS } from './gb/ppu';
 import { createMachine, detectSystem, type Machine, type System } from './machine';
 import type { SaveState } from './savestate';
+import { isZip, unzipRom } from './zip';
 import {
   deleteLibrary,
   getState,
@@ -196,8 +197,19 @@ romInput.addEventListener('change', async () => {
   const file = romInput.files?.[0];
   romInput.value = '';
   if (!file) return;
-  const data = new Uint8Array(await file.arrayBuffer());
-  const started = await startRom(file.name, data);
+  let name = file.name;
+  let data: Uint8Array = new Uint8Array(await file.arrayBuffer());
+  if (isZip(data)) {
+    // ZIP のままでも中の ROM を取り出して遊べる
+    try {
+      ({ name, data } = await unzipRom(data));
+    } catch (e) {
+      closeMenu();
+      showToast(e instanceof Error ? e.message : 'ZIP を開けませんでした');
+      return;
+    }
+  }
+  const started = await startRom(name, data);
   closeMenu();
   if (!started) return;
   if (started.loadedSave) showToast('セーブデータを読み込みました');

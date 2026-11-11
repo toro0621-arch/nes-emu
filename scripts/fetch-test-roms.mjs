@@ -51,6 +51,12 @@ async function download(url, path) {
   console.log(`downloaded ${url}`);
 }
 
+// ワンダースワン（MiSTer のコアのテスト ROM）
+const WS_BASE = 'https://raw.githubusercontent.com/MiSTer-devel/WonderSwan_MiSTer/main/testroms/';
+const WS_FILES = ['spritepriority', 'timingtest', 'windowtest'];
+
 mkdirSync(join(dir, 'gb'), { recursive: true });
+mkdirSync(join(dir, 'ws'), { recursive: true });
 for (const f of FILES) await download(BASE + f, join(dir, f.split('/').pop()));
 for (const [f, name] of GB_FILES) await download(GB_BASE + f, join(dir, 'gb', name));
+for (const n of WS_FILES) await download(`${WS_BASE}${n}/${n}.ws`, join(dir, 'ws', `${n}.ws`));

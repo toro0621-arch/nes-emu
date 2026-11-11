@@ -1,4 +1,6 @@
 // ワンダースワン：小さなテスト用プログラムを組み立てて動かし、画面・割り込み・ボタン・セーブを確かめる
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createMachine, detectSystem } from '../src/machine';
 import { WsDisplay } from '../src/ws/display';
@@ -183,5 +185,50 @@ describe('V30MZ', () => {
     for (let i = 0; i < 6 && !cpu.halted; i++) cpu.step();
     expect(Array.from(mem.subarray(0x20, 0x26))).toEqual([1, 2, 3, 4, 5, 6]);
     expect(cpu.r[1]).toBe(0);
+  });
+});
+
+// ---- MiSTer のテスト ROM（白黒の本体用） ----
+
+describe('ワンダースワンのテスト ROM', () => {
+  const load = (n: string) => {
+    const p = join(__dirname, 'roms', 'ws', n);
+    return existsSync(p) ? new Uint8Array(readFileSync(p)) : null;
+  };
+  /** 背景（$1800 のマップ）の文字を読む */
+  const screen = (ws: Ws) => {
+    const rows: string[] = [];
+    for (let y = 0; y < 18; y++) {
+      let s = '';
+      for (let x = 0; x < 28; x++) {
+        const c = ws.ram[0x1800 + (y * 32 + x) * 2];
+        s += c >= 32 && c < 127 ? String.fromCharCode(c) : ' ';
+      }
+      rows.push(s);
+    }
+    return rows;
+  };
+
+  it('白黒専用のソフトは白黒の本体として動く（カラーだと止まるテスト）', () => {
+    const rom = load('windowtest.ws');
+    if (!rom) return;
+    const m = createMachine(rom, 'windowtest.ws');
+    for (let f = 0; f < 60; f++) m.runFrame();
+    expect(screen((m as unknown as { ws: Ws }).ws).join('\n')).toMatch(/BG2 Win/);
+  });
+
+  it('命令のクロック数（timingtest の最初のページ）', () => {
+    const rom = load('timingtest.ws');
+    if (!rom) return;
+    const m = createMachine(rom, 'timingtest.ws');
+    for (let f = 0; f < 300; f++) {
+      m.runFrame();
+      m.takeSamples();
+    }
+    const rows = screen((m as unknown as { ws: Ws }).ws).filter((r) => /\d+\s+\d+\s+[ox]\s*$/.test(r));
+    const ok = rows.filter((r) => /o\s*$/.test(r));
+    expect(rows.length).toBeGreaterThan(10);
+    // 「セグメント付きの読み込み」と「奇数番地」以外は合う
+    expect(ok.length).toBeGreaterThanOrEqual(rows.length - 3);
   });
 });
