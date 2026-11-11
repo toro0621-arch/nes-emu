@@ -370,6 +370,7 @@ function gbTitle(): string {
 
 async function openMenu(): Promise<void> {
   renderPalettes();
+  renderFfSpeeds();
   menuOpen = true; // 開いている間はゲームを止める
   menu.hidden = false;
   await Promise.all([renderSlots(), renderLibrary()]);
@@ -570,22 +571,59 @@ function libraryRow(entry: LibraryEntry): HTMLLIElement {
 
 // ---- 早送り ----
 const ffButton = $<HTMLButtonElement>('ff');
-const FF_SPEED = 3;
+const FF_SPEEDS = [1.5, 2, 3, 4, 6];
+const FF_KEY = 'nes-emu:ff-speed';
+let ffSpeed = 3;
+try {
+  const v = Number(localStorage.getItem(FF_KEY));
+  if (FF_SPEEDS.includes(v)) ffSpeed = v;
+} catch {
+  // 無視
+}
 let fastForward = false;
-ffButton.addEventListener('click', () => {
-  fastForward = !fastForward;
+const showFf = () => {
   ffButton.classList.toggle('on', fastForward);
   ffButton.setAttribute('aria-pressed', String(fastForward));
+  ffButton.textContent = fastForward ? `⏩×${ffSpeed}` : '⏩';
+};
+ffButton.addEventListener('click', () => {
+  fastForward = !fastForward;
+  showFf();
 });
+
+/** メニューの「早送りの速さ」 */
+function renderFfSpeeds(): void {
+  const el = $('ff-speeds');
+  el.replaceChildren();
+  for (const v of FF_SPEEDS) {
+    el.append(
+      button(
+        `${v} 倍`,
+        () => {
+          ffSpeed = v;
+          try {
+            localStorage.setItem(FF_KEY, String(v));
+          } catch {
+            // 無視
+          }
+          showFf();
+          renderFfSpeeds();
+        },
+        'btn' + (v === ffSpeed ? ' accent' : ''),
+      ),
+    );
+  }
+}
 
 /** 早送り中の音は、間引いて高く速く鳴らす */
 function decimate(samples: Float32Array, n: number): Float32Array {
-  // 左・右が交互に並んでいるので、1 組ずつ間引く
+  // 左・右が交互に並んでいるので、1 組ずつ間引く（1.5 倍などの半端な速さにも対応）
   const frames = Math.floor(samples.length / 2 / n);
   const out = new Float32Array(frames * 2);
   for (let i = 0; i < frames; i++) {
-    out[i * 2] = samples[i * n * 2];
-    out[i * 2 + 1] = samples[i * n * 2 + 1];
+    const j = Math.floor(i * n) * 2;
+    out[i * 2] = samples[j];
+    out[i * 2 + 1] = samples[j + 1];
   }
   return out;
 }
@@ -600,7 +638,7 @@ function loop(now: number): void {
   const dt = now - last;
   last = now;
   if (machine && image && !document.hidden && !menuOpen) {
-    const speed = fastForward ? FF_SPEED : 1;
+    const speed = fastForward ? ffSpeed : 1;
     // 本体ごとのフレームレート（ファミコン 60.1、ゲームボーイ 59.7、ワンダースワン 75.5）で進める
     const FRAME_MS = 1000 / machine.fps;
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);

@@ -567,3 +567,14 @@ html[data-wsvertical] .round.small {
 html[data-system='ws'] [data-btn='SELECT'] {
   visibility: hidden;
 }
+
+/* 早送りの速さ */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chips .btn {
+  min-width: 56px;
+  padding: 7px 12px;
+}
