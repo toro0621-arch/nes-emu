@@ -47,6 +47,8 @@ export interface Machine {
   readonly colorable: boolean;
   /** 色づけのパレット（palettes.ts の id） */
   setPalette(id: string): void;
+  /** 液晶っぽい色にする（ゲームボーイアドバンスだけ） */
+  setLcdColor?(on: boolean): void;
   reset(): void;
   /** バッテリーバックアップのセーブデータ（なければ null） */
   readonly saveRam: Uint8Array | null;
@@ -344,12 +346,17 @@ class GbaMachine implements Machine {
   gba: Gba;
   private keys = 0;
   private spread = 1;
+  private lcd = false;
 
   constructor(private readonly data: Uint8Array) {
     this.gba = new Gba(data);
     this.gba.apu.stereo = true;
   }
   setPalette() {}
+  setLcdColor(on: boolean) {
+    this.lcd = on;
+    this.gba.ppu.lcd = on;
+  }
   get frameBuffer() {
     return this.gba.ppu.frameBuffer;
   }
@@ -395,6 +402,7 @@ class GbaMachine implements Machine {
     next.apu.sampleRate = old.apu.sampleRate;
     next.apu.rateAdjust = old.apu.rateAdjust;
     next.setKeys(this.keys);
+    next.ppu.lcd = this.lcd;
     this.gba = next;
   }
   get saveRam() {
@@ -421,5 +429,6 @@ class GbaMachine implements Machine {
   loadState(s: SaveState) {
     applyState(s, 'gba', this.data.length, this.parts());
     this.gba.save.dirty = true;
+    this.gba.ppu.lcd = this.lcd;
   }
 }

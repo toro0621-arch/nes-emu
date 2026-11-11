@@ -7,6 +7,10 @@ export interface ArmBus {
   cycles: number;
   /** ここまで実行したら止まる（途中で予定が変わると早まる） */
   stopAt: number;
+  /** 書き込みの回数（待ちループを見分けるのに使う） */
+  writes: number;
+  /** 読むたびに変わりうる値（タイマーなど）を読んだ */
+  volatileRead: boolean;
   /** IME・IE・IF から割り込みを受けられる状態か */
   irqReady: boolean;
   /** IE & IF が 0 でない（HALT から戻る） */
@@ -103,6 +107,10 @@ export class Arm7 {
   halted = false;
   /** シフタのキャリー（命令の途中で使う） */
   shc = 0;
+  /** 待ちループの見張り：ループの先頭・そのときのレジスタとフラグ・書き込み回数 */
+  idleAddr = -1;
+  idleRegs = new Int32Array(16);
+  idleWrites = 0;
 
   constructor(public bus: ArmBus) {}
 
@@ -166,8 +174,42 @@ export class Arm7 {
 
   /** r15 に書いたとき（分岐） */
   branch(a: number): void {
+    const from = this.pc;
     this.pc = this.t ? a & ~1 : a & ~3;
     this.bus.cycles += this.bus.branchCost(this.pc, this.t);
+    // 少しだけ後ろへ戻る分岐はループ。何もせずに待っているだけなら時間を飛ばす
+    const d = from - this.pc;
+    if (d > 0 && d <= 48) this.checkIdle();
+  }
+
+  /**
+   * ループの先頭に戻ってきたとき、前の回とレジスタ・フラグがまったく同じで、
+   * その間にメモリへ書かず、タイマーのように勝手に変わる値も読んでいなければ、
+   * 次に何か起きる（割り込み・ラインの区切り・タイマー）まで同じことをくり返すだけなので、そこまで飛ばす
+   */
+  private checkIdle(): void {
+    const b = this.bus;
+    const r = this.r;
+    const s = this.idleRegs;
+    const flags = this.nzcv();
+    if (this.pc === this.idleAddr && b.writes === this.idleWrites && !b.volatileRead && s[15] === flags) {
+      let same = true;
+      for (let i = 0; i < 15; i++) {
+        if (r[i] !== s[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) {
+        if (b.stopAt > b.cycles) b.cycles = b.stopAt;
+        return;
+      }
+    }
+    this.idleAddr = this.pc;
+    for (let i = 0; i < 15; i++) s[i] = r[i];
+    s[15] = flags;
+    this.idleWrites = b.writes;
+    b.volatileRead = false;
   }
 
   exception(vector: number, mode: number, lr: number): void {

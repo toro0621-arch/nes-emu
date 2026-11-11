@@ -38,6 +38,24 @@
           <p class="hint" id="slots-hint"></p>
           <div id="slots"></div>
         </section>
+        <section id="sram-section" hidden>
+          <h2>ゲームのセーブデータ</h2>
+          <p class="hint">ファイル（.sav）にして取っておけます。ほかのエミュレータのセーブも読み込めます</p>
+          <div class="chips">
+            <button class="btn" id="sav-export">書き出す</button>
+            <label class="btn">
+              読み込む
+              <input type="file" id="sav-file" hidden />
+            </label>
+          </div>
+        </section>
+        <section id="lcd-section" hidden>
+          <div class="menu-row">
+            <h2>液晶っぽい色</h2>
+            <button class="btn" id="lcd" aria-pressed="false">オフ</button>
+          </div>
+          <p class="hint">当時の GBA の画面のような、落ち着いた色にします</p>
+        </section>
         <section id="color-section" hidden>
           <h2>ゲームボーイの色</h2>
           <p class="hint">白黒のソフトに色をつけます（ソフトごとに覚えます）</p>

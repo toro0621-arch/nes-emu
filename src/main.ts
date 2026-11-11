@@ -167,6 +167,7 @@ async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: b
   void saveLastRom({ name, data });
   next.setStereo(stereo ? 1 : 0);
   next.setPalette(paletteFor(id));
+  next.setLcdColor?.(lcdColor);
   bindScreen(next);
   message.textContent = '';
   resetButton.disabled = false;
@@ -302,6 +303,77 @@ stereoButton.addEventListener('click', () => {
   showStereo();
 });
 
+// ---- 液晶っぽい色（ゲームボーイアドバンス。全部のソフトで共通） ----
+const LCD_KEY = 'nes-emu:gba-lcd';
+let lcdColor = false;
+try {
+  lcdColor = localStorage.getItem(LCD_KEY) === '1';
+} catch {
+  // 保存できない環境では毎回オフ
+}
+const lcdSection = $('lcd-section');
+const lcdButton = $<HTMLButtonElement>('lcd');
+function renderLcd(): void {
+  lcdSection.hidden = !machine?.setLcdColor;
+  lcdButton.textContent = lcdColor ? 'オン' : 'オフ';
+  lcdButton.classList.toggle('accent', lcdColor);
+  lcdButton.setAttribute('aria-pressed', String(lcdColor));
+}
+lcdButton.addEventListener('click', () => {
+  lcdColor = !lcdColor;
+  try {
+    localStorage.setItem(LCD_KEY, lcdColor ? '1' : '0');
+  } catch {
+    // 無視
+  }
+  machine?.setLcdColor?.(lcdColor);
+  renderLcd();
+});
+
+// ---- ゲームのセーブデータ（バッテリーバックアップ）の書き出し・読み込み ----
+const sramSection = $('sram-section');
+const savFile = $<HTMLInputElement>('sav-file');
+function renderSram(): void {
+  sramSection.hidden = !machine?.saveRam || !currentRom;
+}
+$('sav-export').addEventListener('click', () => {
+  const ram = machine?.saveRam;
+  if (!ram || !currentRom) return;
+  void flushSave();
+  const url = URL.createObjectURL(new Blob([ram.slice()], { type: 'application/octet-stream' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${baseName(currentRom.name)}.sav`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  showToast('セーブデータを書き出しました');
+});
+savFile.addEventListener('change', async () => {
+  const file = savFile.files?.[0];
+  savFile.value = '';
+  const m = machine;
+  const rom = currentRom;
+  const id = currentId;
+  if (!file || !m?.saveRam || !rom || !id) return;
+  if (!confirm(`「${baseName(rom.name)}」のいまのセーブデータを、読み込むファイルで上書きして、ゲームを最初から始めます。よろしいですか？`)) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  // ファイルが短ければ足りないところはいまのまま、長ければ余りは使わない
+  const next = m.saveRam.slice();
+  next.set(bytes.subarray(0, next.length));
+  if (!(await saveSram(id, next))) {
+    showToast('セーブデータを保存できませんでした');
+    return;
+  }
+  // 作り直して、保存したセーブデータから始める（いまのセーブで上書きしないように）
+  m.saveDirty = false;
+  currentRom = null;
+  const started = await startRom(rom.name, rom.data);
+  closeMenu();
+  showToast(started?.loadedSave ? 'セーブデータを読み込みました' : 'セーブデータを読み込めませんでした');
+});
+
 // ---- ゲームボーイの色づけ（ソフトごとに覚える。最初は「おまかせ」） ----
 const PALETTE_KEY = 'nes-emu:gbpal:';
 const colorSection = $('color-section');
@@ -370,6 +442,8 @@ function gbTitle(): string {
 
 async function openMenu(): Promise<void> {
   renderPalettes();
+  renderLcd();
+  renderSram();
   renderFfSpeeds();
   menuOpen = true; // 開いている間はゲームを止める
   menu.hidden = false;

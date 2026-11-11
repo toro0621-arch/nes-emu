@@ -17,6 +17,24 @@ for (let c = 0; c < 32768; c++) {
   COLORS[c] = 0xff000000 | (((b << 3) | (b >> 2)) << 16) | (((g << 3) | (g >> 2)) << 8) | ((r << 3) | (r >> 2));
 }
 
+/**
+ * 液晶っぽい色。GBA の液晶は暗めで色が薄く、隣の色が少し混ざって見えた。
+ * ゲームはそれを見越して濃い色で作られているので、今の画面だとギラついて見える。
+ * 光の量に直して（ガンマ 2.7）色を少し混ぜ、明るさを 94% にしてから画面のガンマ（2.2）に戻す
+ * （Pokefan531 さんの GBA 用の色の補正と同じ考え方）
+ */
+const LCD_COLORS = new Uint32Array(32768);
+for (let c = 0; c < 32768; c++) {
+  const r = ((c & 31) / 31) ** 2.7;
+  const g = (((c >> 5) & 31) / 31) ** 2.7;
+  const b = (((c >> 10) & 31) / 31) ** 2.7;
+  const out = (v: number) => Math.round(Math.min(1, Math.max(0, v * 0.94)) ** (1 / 2.2) * 255);
+  const or = out(0.82 * r + 0.125 * g + 0.195 * b);
+  const og = out(0.24 * r + 0.665 * g + 0.075 * b);
+  const ob = out(-0.06 * r + 0.21 * g + 0.73 * b);
+  LCD_COLORS[c] = 0xff000000 | (ob << 16) | (og << 8) | or;
+}
+
 /** OBJ の形 × 大きさ → 幅・高さ */
 const OBJ_W = [8, 16, 32, 64, 16, 32, 32, 64, 8, 8, 16, 32, 8, 8, 8, 8];
 const OBJ_H = [8, 16, 32, 64, 8, 8, 16, 32, 16, 32, 32, 64, 8, 8, 8, 8];
@@ -27,6 +45,8 @@ function sign28(v: number): number {
 
 export class GbaPpu {
   frameBuffer = new Uint32Array(GBA_W * GBA_H) as Uint32Array<ArrayBuffer>;
+  /** 液晶っぽい色にする */
+  lcd = false;
   /** 回転拡大 BG の基準点（ラインごとに PB・PD ずつ進む） */
   bg2x = 0;
   bg2y = 0;
@@ -81,7 +101,7 @@ export class GbaPpu {
     const row = y * GBA_W;
     if (dispcnt & 0x80) {
       // 強制ブランク（白）
-      out.fill(0xffffffff, row, row + GBA_W);
+      out.fill(this.lcd ? LCD_COLORS[0x7fff] : 0xffffffff, row, row + GBA_W);
       this.stepRefs();
       return;
     }
@@ -141,6 +161,7 @@ export class GbaPpu {
     const prio1 = io[5] & 3;
     const prio2 = io[6] & 3;
     const prio3 = io[7] & 3;
+    const colors = this.lcd ? LCD_COLORS : COLORS;
 
     for (let x = 0; x < GBA_W; x++) {
       const mask = anyWin ? winMask[x] : 0x3f;
@@ -202,7 +223,7 @@ export class GbaPpu {
         } else if (blendMode === 2) color = brighten(c1, evy);
         else if (blendMode === 3) color = darken(c1, evy);
       }
-      out[row + x] = COLORS[color];
+      out[row + x] = colors[color];
     }
     this.stepRefs();
   }

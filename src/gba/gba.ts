@@ -24,6 +24,8 @@ export class Gba implements ArmBus {
   cycles = 0;
   stopAt = 0;
   irqReady = false;
+  writes = 0;
+  volatileRead = false;
 
   readonly cpu: Arm7;
   readonly ppu: GbaPpu;
@@ -383,6 +385,7 @@ export class Gba implements ArmBus {
 
   write8(a: number, v: number): void {
     const r = a >>> 24;
+    this.writes++;
     if (r > 15) return;
     this.cycles += this.n16[r];
     switch (r) {
@@ -414,6 +417,7 @@ export class Gba implements ArmBus {
 
   write16(a: number, v: number): void {
     const r = a >>> 24;
+    this.writes++;
     if (r > 15) return;
     this.cycles += this.n16[r];
     switch (r) {
@@ -455,6 +459,7 @@ export class Gba implements ArmBus {
 
   write32(a: number, v: number): void {
     const r = a >>> 24;
+    this.writes++;
     if (r > 15) return;
     this.cycles += this.n32[r];
     switch (r) {
@@ -505,11 +510,15 @@ export class Gba implements ArmBus {
       case 0x108:
       case 0x10c:
         this.syncTimers();
+        this.volatileRead = true;
         return this.tmCounter[(a - 0x100) >> 2] & 0xffff;
       case 0x130:
         return ~this.keys & 0x3ff;
     }
-    if (a >= 0x60 && a < 0xa0) return this.apu.read8(a) | (this.apu.read8(a + 1) << 8);
+    if (a >= 0x60 && a < 0xa0) {
+      this.volatileRead = true;
+      return this.apu.read8(a) | (this.apu.read8(a + 1) << 8);
+    }
     // 書き込み専用のレジスタ（BG のスクロールなど）は 0 に見える
     if ((a >= 0x10 && a < 0x48) || (a >= 0x4c && a < 0x50) || (a >= 0x54 && a < 0x60)) return 0;
     if (a >= 0xa0 && a < 0xb8) return 0;
