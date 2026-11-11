@@ -20,6 +20,8 @@ export class TouchInput {
   private keys: [HTMLElement, number][];
   /** ワンダースワン用の 4 つのボタン（見えているときだけ） */
   private extra: [HTMLElement, number][];
+  /** ゲームボーイアドバンスの L・R（見えているときだけ） */
+  private shoulder: [HTMLElement, number][];
 
   /** ページ全体を 90° 回して表示しているか（画面上の向きを、ボタンの向きに直す） */
   rotated = false;
@@ -38,6 +40,10 @@ export class TouchInput {
       [q('[data-btn="EX_RIGHT"]'), BUTTON.EX_RIGHT],
       [q('[data-btn="EX_DOWN"]'), BUTTON.EX_DOWN],
       [q('[data-btn="EX_LEFT"]'), BUTTON.EX_LEFT],
+    ];
+    this.shoulder = [
+      [q('[data-btn="L"]'), BUTTON.L],
+      [q('[data-btn="R"]'), BUTTON.R],
     ];
 
     root.addEventListener('pointerdown', (e) => {
@@ -63,6 +69,14 @@ export class TouchInput {
   }
 
   private hitTest(x: number, y: number): number {
+    // L・R（十字キーや A・B より先に。少し広めに反応させる）
+    if (this.shoulder[0][0].offsetParent !== null) {
+      for (const [el, m] of this.shoulder) {
+        const k = el.getBoundingClientRect();
+        const pad = 8;
+        if (x >= k.left - pad && x <= k.right + pad && y >= k.top - pad && y <= k.bottom + pad) return m;
+      }
+    }
     // 十字キー（見た目より少し広く反応させる）
     const d = this.dpad.getBoundingClientRect();
     const r = d.width / 2;

@@ -26,6 +26,7 @@ npm run build
 - [x] 追加：ゲーム一覧をフォルダ式に（ファミコン・ゲームボーイ）、白黒のゲームボーイのソフトに色をつける（ゲームボーイカラー本体の色づけをもとにした 12 種類＋白黒、ソフトごとに覚える）、ステレオ（ゲームボーイは実機どおり、ファミコンは矩形波 1 を左・2 を右へ少し寄せる。メニューで切り替え）
 
 - [x] ワンダースワン・ワンダースワンカラー（`src/ws/`）。.ws / .wsc を読み込むと自動で切り替わる。白黒・カラー（2 ビット・4 ビット）、スプライトとウィンドウ、音（波形メモリ・PCM・スイープ・ノイズ・サウンド DMA）、SRAM と EEPROM のセーブ、時計。縦持ちのソフトは画面を回し、十字キーを Y ボタンに割り当てる。CPU は NEC V20 の実機テスト（SingleStepTests/v20）で確かめた（未定義のフラグを除き、ほぼすべて一致）
+- [x] ゲームボーイアドバンス（`src/gba/`）。.gba を読み込むと自動で切り替わり、L・R ボタンが出る。CPU（ARM7TDMI。ARM と Thumb）、画面（モード 0〜5、回転拡大、スプライト、ウィンドウ、半透明・明るさ、モザイク）、DMA、タイマー、音（ゲームボーイと同じ 4 チャンネル＋ PCM の FIFO 2 つ）、セーブ（SRAM・フラッシュ 64K / 128K・EEPROM。ROM の中の印で見分ける）、カートリッジの時計。BIOS は任天堂のものではなく、一から書かれた互換の BIOS（[Cult-of-GBA BIOS](https://github.com/Cult-of-GBA/BIOS)、MIT）を使う。起動画面は飛ばす。CPU は jsmolka/gba-tests と FuzzARM（ランダムな 1 万命令）で確かめた
 
 ### 対応マッパー
 
@@ -55,6 +56,7 @@ npm run build
 | 十字キー | 左の十字キー（斜めも可） | 矢印キー |
 | A / B | 右の赤いボタン（A と B の間で両方） | X / Z |
 | START / SELECT | 下の細いボタン | Enter / Shift |
+| L / R（ゲームボーイアドバンス） | 十字キーと A・B の上 | A / S |
 
 ## スマホに入れる（PWA）
 1. `npm run build` でできた `dist/` を HTTPS のサーバーに置く（GitHub Pages・Cloudflare Pages など。どの URL の下でも動く）
@@ -86,6 +88,7 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `src/cartridge.ts` | iNES ヘッダーの読み込み |
 | `src/gb/palettes.ts` | 白黒のソフトの色づけ（パレットと、題名からの「おまかせ」） |
 | `src/ws/` | ワンダースワン。`cpu.ts`（V30MZ ＝ 8086 / 80186 互換）、`ws.ts`（メモリ・I/O ポート・割り込み・タイマー・ボタン・DMA・EEPROM・時計）、`display.ts`（画面）、`sound.ts`（音） |
+| `src/gba/` | ゲームボーイアドバンス。`cpu.ts`（ARM7TDMI。命令のビットから引く表で ARM・Thumb を実行）、`gba.ts`（メモリ・I/O・DMA・タイマー・割り込み・待ち時間・1 フレームの流れ）、`ppu.ts`（画面。ライン単位で描く）、`apu.ts`（音）、`save.ts`（SRAM・フラッシュ・EEPROM・時計）、`bios.ts`（互換 BIOS） |
 | `src/machine.ts` | ファミコンとゲームボーイを、アプリから同じように扱うための窓口（ROM の中身から本体を決める） |
 | `src/gb/` | ゲームボーイ。`cpu.ts`（SM83。読み書き 1 回ごとに 1 M サイクル進める）、`gb.ts`（メモリ・タイマー・DMA・ボタン・倍速）、`ppu.ts`（画面。ライン単位で描く）、`apu.ts`（音）、`cart.ts`（MBC・時計） |
 | `src/savestate.ts` | どこでもセーブ。CPU・PPU・APU・バス・マッパーのフィールドをたどって写し取り、書き戻す（ROM・関数・部品どうしの参照は写さない） |
@@ -96,6 +99,7 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `test/mappers.test.ts` | MMC1・MMC3 を使う blargg のテスト ROM |
 | `test/mapper-units.test.ts` | 各マッパーのバンク切り替え・IRQ を直接確かめる |
 | `test/ws.test.ts` | ワンダースワン：テスト用のプログラムをその場で組み立てて、割り込み・画面・ボタン・縦持ち・セーブを確かめる |
+| `test/gba.test.ts` | ゲームボーイアドバンス：手で組み立てた小さなプログラム（画面・ボタン・L / R）、どこでもセーブ、EEPROM、jsmolka/gba-tests と FuzzARM |
 | `test/gb.test.ts` | ゲームボーイ：blargg のテスト ROM、画面（スプライト・ウィンドウ・カラーのパレット）、MBC、どこでもセーブ |
 | `test/savestate.test.ts` | セーブしたところから動かし直すと、画面・RAM・音が同じになるか |
 | `test/mapper-more.test.ts` | あとから足したマッパー（VRC・ナムコ・サンソフト・バンダイの EEPROM・MMC5 など） |
@@ -103,4 +107,4 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 
 ## ライセンス
 
-MIT License（[LICENSE](LICENSE)）。ゲームの ROM は含まれていません。自分で持っているソフトから吸い出したものを使ってください。
+MIT License（[LICENSE](LICENSE)）。ゲームボーイアドバンスの互換 BIOS（`src/gba/bios.ts`）は Cult-of-GBA BIOS（Copyright 2020 - 2021 DenSinH and fleroviux、MIT License。[public/THIRD-PARTY-NOTICES.txt](public/THIRD-PARTY-NOTICES.txt)）。ゲームの ROM は含まれていません。自分で持っているソフトから吸い出したものを使ってください。

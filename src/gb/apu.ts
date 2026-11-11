@@ -36,7 +36,7 @@ class Envelope {
   }
 }
 
-class Square {
+export class Square {
   on = false;
   dac = false;
   duty = 0;
@@ -140,7 +140,7 @@ class Square {
  * NRx4 を書いたときの長さカウンタ。次の段が長さを数えない段（quirk）なら、
  * 長さを有効にした瞬間に 1 つ数える。トリガーで 0 なら最大に戻す
  */
-function lengthWrite(ch: { length: number; lengthOn: boolean; on: boolean }, v: number, quirk: boolean, max: number): number {
+export function lengthWrite(ch: { length: number; lengthOn: boolean; on: boolean }, v: number, quirk: boolean, max: number): number {
   const wasOn = ch.lengthOn;
   ch.lengthOn = (v & 0x40) !== 0;
   let len = ch.length;
@@ -207,7 +207,7 @@ class Wave {
   }
 }
 
-class Noise {
+export class Noise {
   on = false;
   dac = false;
   length = 0;

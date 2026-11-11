@@ -7,14 +7,18 @@ import { GB_H, GB_W } from './gb/ppu';
 import { Nes } from './nes';
 import { SCREEN_H, SCREEN_W } from './ppu';
 import { applyState, captureState, loadState, saveState, type SaveState } from './savestate';
+import { GBA_CLOCK } from './gba/apu';
+import { Gba, isGbaRom } from './gba/gba';
+import { GBA_H, GBA_W } from './gba/ppu';
 import { WS_H, WS_W } from './ws/display';
 import { isWsRom, Ws } from './ws/ws';
 
-export type System = 'nes' | 'gb' | 'ws';
+export type System = 'nes' | 'gb' | 'ws' | 'gba';
 
 /** ROM の中身（とファイル名）から本体を決める。わからなければ null */
 export function detectSystem(data: Uint8Array, name = ''): System | null {
   if (data[0] === 0x4e && data[1] === 0x45 && data[2] === 0x53 && data[3] === 0x1a) return 'nes';
+  if (isGbaRom(data)) return 'gba';
   if (isGbRom(data)) return 'gb';
   if (/\.wsc?$/i.test(name) || isWsRom(data)) return 'ws';
   return null;
@@ -62,8 +66,12 @@ export function createMachine(data: Uint8Array, name = ''): Machine {
       return new GbMachine(data);
     case 'ws':
       return new WsMachine(data);
+    case 'gba':
+      return new GbaMachine(data);
   }
-  throw new Error('ファミコン（.nes）・ゲームボーイ（.gb / .gbc）・ワンダースワン（.ws / .wsc）の ROM を選んでください');
+  throw new Error(
+    'ファミコン（.nes）・ゲームボーイ（.gb / .gbc）・ワンダースワン（.ws / .wsc）・ゲームボーイアドバンス（.gba）の ROM を選んでください',
+  );
 }
 
 class NesMachine implements Machine {
@@ -321,5 +329,97 @@ class WsMachine implements Machine {
   loadState(s: SaveState) {
     applyState(s, 'ws', this.id(), this.parts());
     this.ws.saveDirty = this.ws.saveRam !== null;
+  }
+}
+
+/** ゲームボーイアドバンス（L・R ボタンあり） */
+class GbaMachine implements Machine {
+  readonly system = 'gba';
+  /** 1 フレーム = 228 ライン × 1232 クロック */
+  readonly fps = GBA_CLOCK / 280896;
+  readonly width = GBA_W;
+  readonly height = GBA_H;
+  readonly crop = 0;
+  readonly colorable = false;
+  gba: Gba;
+  private keys = 0;
+  private spread = 1;
+
+  constructor(private readonly data: Uint8Array) {
+    this.gba = new Gba(data);
+    this.gba.apu.stereo = true;
+  }
+  setPalette() {}
+  get frameBuffer() {
+    return this.gba.ppu.frameBuffer;
+  }
+  runFrame() {
+    this.gba.runFrame();
+  }
+  setButtons(b: number) {
+    if ((b & (BUTTON.UP | BUTTON.DOWN)) === (BUTTON.UP | BUTTON.DOWN)) b &= ~(BUTTON.UP | BUTTON.DOWN);
+    if ((b & (BUTTON.LEFT | BUTTON.RIGHT)) === (BUTTON.LEFT | BUTTON.RIGHT)) b &= ~(BUTTON.LEFT | BUTTON.RIGHT);
+    // KEYINPUT の並び：A B SELECT START → ← ↑ ↓ R L
+    let k = 0;
+    if (b & BUTTON.A) k |= 1;
+    if (b & BUTTON.B) k |= 2;
+    if (b & BUTTON.SELECT) k |= 4;
+    if (b & BUTTON.START) k |= 8;
+    if (b & BUTTON.RIGHT) k |= 0x10;
+    if (b & BUTTON.LEFT) k |= 0x20;
+    if (b & BUTTON.UP) k |= 0x40;
+    if (b & BUTTON.DOWN) k |= 0x80;
+    if (b & BUTTON.R) k |= 0x100;
+    if (b & BUTTON.L) k |= 0x200;
+    if (k === this.keys) return;
+    this.keys = k;
+    this.gba.setKeys(k);
+  }
+  takeSamples() {
+    return this.gba.apu.takeSamples();
+  }
+  setAudio(rate: number, adjust: number) {
+    this.gba.apu.sampleRate = rate;
+    this.gba.apu.rateAdjust = adjust;
+  }
+  setStereo(spread: number) {
+    this.spread = spread;
+    this.gba.apu.spread = spread;
+  }
+  reset() {
+    const old = this.gba;
+    const next = new Gba(this.data);
+    next.save.data.set(old.save.data);
+    next.apu.stereo = true;
+    next.apu.spread = this.spread;
+    next.apu.sampleRate = old.apu.sampleRate;
+    next.apu.rateAdjust = old.apu.rateAdjust;
+    next.setKeys(this.keys);
+    this.gba = next;
+  }
+  get saveRam() {
+    return this.gba.save.data;
+  }
+  get saveDirty() {
+    return this.gba.save.dirty;
+  }
+  set saveDirty(v: boolean) {
+    this.gba.save.dirty = v;
+  }
+  afterSaveLoaded() {}
+  private parts(): Record<string, object> {
+    const g = this.gba;
+    const parts: Record<string, object> = { gba: g, cpu: g.cpu, ppu: g.ppu, apu: g.apu, save: g.save };
+    if (g.rtc) parts.rtc = g.rtc;
+    return parts;
+  }
+  saveState() {
+    const g = this.gba;
+    const skip = new Set<unknown>([g, g.cpu, g.ppu, g.apu, g.save, g.rtc, ...g.stateSkip(), ...g.ppu.stateSkip()]);
+    return captureState('gba', this.data.length, this.parts(), skip);
+  }
+  loadState(s: SaveState) {
+    applyState(s, 'gba', this.data.length, this.parts());
+    this.gba.save.dirty = true;
   }
 }

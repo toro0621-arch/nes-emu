@@ -1,6 +1,6 @@
 // ZIP ファイルから ROM を取り出す（ROM を ZIP のまま選んでも遊べるように）
 
-const ROM_EXT = /\.(nes|gbc?|wsc?)$/i;
+const ROM_EXT = /\.(nes|gbc?|gba|wsc?)$/i;
 
 export function isZip(data: Uint8Array): boolean {
   return data.length > 30 && data[0] === 0x50 && data[1] === 0x4b && data[2] === 0x03 && data[3] === 0x04;

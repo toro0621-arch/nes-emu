@@ -4,3 +4,6 @@ test/roms
 *.nes
 *.gb
 *.gbc
+*.gba
+*.ws
+*.wsc

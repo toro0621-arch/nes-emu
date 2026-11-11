@@ -93,7 +93,7 @@ function bindScreen(m: Machine): void {
 }
 
 /** ファイル名から拡張子を取る */
-const baseName = (name: string) => name.replace(/\.(nes|gbc?|wsc?)$/i, '');
+const baseName = (name: string) => name.replace(/\.(nes|gbc?|gba|wsc?)$/i, '');
 
 // ---- 音 ----
 const audio = new AudioOutput();
@@ -489,6 +489,7 @@ const FOLDERS: { system: System; name: string; icon: string }[] = [
   { system: 'nes', name: 'ファミコン', icon: '🎮' },
   { system: 'gb', name: 'ゲームボーイ', icon: '🕹️' },
   { system: 'ws', name: 'ワンダースワン', icon: '📟' },
+  { system: 'gba', name: 'ゲームボーイアドバンス', icon: '🟣' },
 ];
 /** 開いているフォルダ（null ならフォルダの一覧） */
 let openFolder: System | null = null;

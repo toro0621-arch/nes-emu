@@ -60,3 +60,16 @@ mkdirSync(join(dir, 'ws'), { recursive: true });
 for (const f of FILES) await download(BASE + f, join(dir, f.split('/').pop()));
 for (const [f, name] of GB_FILES) await download(GB_BASE + f, join(dir, 'gb', name));
 for (const n of WS_FILES) await download(`${WS_BASE}${n}/${n}.ws`, join(dir, 'ws', `${n}.ws`));
+
+// ゲームボーイアドバンス（jsmolka/gba-tests は MIT、DenSinH/FuzzARM は GPL-3.0。どちらもテストに使うだけで同梱しない）
+const GBA_FILES = [
+  ['https://raw.githubusercontent.com/jsmolka/gba-tests/master/arm/arm.gba', 'arm.gba'],
+  ['https://raw.githubusercontent.com/jsmolka/gba-tests/master/thumb/thumb.gba', 'thumb.gba'],
+  ['https://raw.githubusercontent.com/jsmolka/gba-tests/master/memory/memory.gba', 'memory.gba'],
+  ['https://raw.githubusercontent.com/jsmolka/gba-tests/master/save/sram.gba', 'save-sram.gba'],
+  ['https://raw.githubusercontent.com/jsmolka/gba-tests/master/save/flash64.gba', 'save-flash64.gba'],
+  ['https://raw.githubusercontent.com/jsmolka/gba-tests/master/save/flash128.gba', 'save-flash128.gba'],
+  ['https://raw.githubusercontent.com/DenSinH/FuzzARM/master/FuzzARM.gba', 'FuzzARM.gba'],
+];
+mkdirSync(join(dir, 'gba'), { recursive: true });
+for (const [url, name] of GBA_FILES) await download(url, join(dir, 'gba', name));

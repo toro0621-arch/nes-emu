@@ -578,3 +578,48 @@ html[data-system='ws'] [data-btn='SELECT'] {
   min-width: 56px;
   padding: 7px 12px;
 }
+
+/* ---- ゲームボーイアドバンスの L・R（十字キーと A・B の上に） ---- */
+#lr {
+  display: none;
+}
+html[data-system='gba'] #lr {
+  display: block;
+}
+html[data-system='gba'] #pad {
+  min-height: calc(var(--unit) * 5.6);
+}
+.shoulder {
+  position: absolute;
+  /* 十字キーのすぐ上。場所が足りなければいちばん上に */
+  top: max(calc(var(--unit) * 0.1), calc(50% - var(--unit) * 3.05));
+  width: calc(var(--unit) * 2.2);
+  height: calc(var(--unit) * 0.65);
+  border-radius: calc(var(--unit) * 0.32) calc(var(--unit) * 0.32) 8px 8px;
+  background: var(--panel);
+  border: 1px solid #3a3a4a;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: calc(var(--unit) * 0.32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.shoulder[data-btn='L'] {
+  left: calc(var(--unit) * 0.75);
+}
+.shoulder[data-btn='R'] {
+  right: calc(var(--unit) * 0.77);
+}
+.shoulder.pressed {
+  background: #4a4a5c;
+}
+html.landscape .shoulder {
+  top: max(calc(var(--unit) * 0.2), calc(52% - var(--unit) * 2.55));
+}
+html.landscape .shoulder[data-btn='L'] {
+  left: calc((var(--side) - var(--unit) * 2.2) / 2);
+}
+html.landscape .shoulder[data-btn='R'] {
+  right: calc((var(--side) - var(--unit) * 2.2) / 2);
+}
