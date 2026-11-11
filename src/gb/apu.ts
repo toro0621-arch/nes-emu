@@ -275,8 +275,11 @@ export class GbApu {
   sampleRate = 48000;
   /** 画面と音がずれないようにする補正（main.ts が決める） */
   rateAdjust = 1;
-  samples = new Float32Array(4096);
+  samples = new Float32Array(8192);
   sampleLength = 0;
+  /** true なら左・右を交互に出す（アプリ用）。spread：0 = モノラル、1 = 実機どおりのステレオ */
+  stereo = false;
+  spread = 1;
 
   private power = true;
   private regs = new Uint8Array(0x30);
@@ -286,10 +289,15 @@ export class GbApu {
   private ch4 = new Noise();
   private seqStep = 0;
   private sum = 0;
+  private sumR = 0;
   private count = 0;
   private acc = 0;
   private hpPrev = 0;
   private hpOut = 0;
+  private hpPrevR = 0;
+  private hpOutR = 0;
+  private mixL = 0;
+  private mixR = 0;
 
   constructor() {
     // 起動直後の状態（音量最大・全チャンネルを左右に）
@@ -361,7 +369,9 @@ export class GbApu {
   /** n ドット（4.19MHz）進める */
   advance(n: number): void {
     // その間の出力（この間は一定とみなす）
-    this.sum += this.mix() * n;
+    this.mix();
+    this.sum += this.mixL * n;
+    this.sumR += this.mixR * n;
     this.count += n;
     this.ch1.advance(n);
     this.ch2.advance(n);
@@ -370,16 +380,36 @@ export class GbApu {
     this.acc += n * this.sampleRate * this.rateAdjust;
     if (this.acc < GB_CLOCK) return;
     this.acc -= GB_CLOCK;
-    const x = this.sum / this.count;
+    let l = this.sum / this.count;
+    let r = this.sumR / this.count;
     this.sum = 0;
+    this.sumR = 0;
     this.count = 0;
-    this.hpOut = 0.996 * (this.hpOut + x - this.hpPrev); // 直流分を落とす
-    this.hpPrev = x;
-    if (this.sampleLength < this.samples.length) this.samples[this.sampleLength++] = this.hpOut;
+    // 広がりを調整（0 なら左右とも真ん中＝モノラル）
+    const m = (l + r) / 2;
+    const side = ((l - r) / 2) * (this.stereo ? this.spread : 0);
+    l = m + side;
+    r = m - side;
+    this.hpOut = 0.996 * (this.hpOut + l - this.hpPrev); // 直流分を落とす
+    this.hpPrev = l;
+    if (!this.stereo) {
+      if (this.sampleLength < this.samples.length) this.samples[this.sampleLength++] = this.hpOut;
+      return;
+    }
+    this.hpOutR = 0.996 * (this.hpOutR + r - this.hpPrevR);
+    this.hpPrevR = r;
+    if (this.sampleLength + 1 < this.samples.length) {
+      this.samples[this.sampleLength++] = this.hpOut;
+      this.samples[this.sampleLength++] = this.hpOutR;
+    }
   }
 
-  private mix(): number {
-    if (!this.power) return 0;
+  /** 今の左右の出力を mixL・mixR に入れる */
+  private mix(): void {
+    if (!this.power) {
+      this.mixL = this.mixR = 0;
+      return;
+    }
     const pan = this.regs[0x15];
     const vol = this.regs[0x14];
     const o1 = this.ch1.output();
@@ -389,7 +419,8 @@ export class GbApu {
     const left = (pan & 0x10 ? o1 : 0) + (pan & 0x20 ? o2 : 0) + (pan & 0x40 ? o3 : 0) + (pan & 0x80 ? o4 : 0);
     const right = (pan & 1 ? o1 : 0) + (pan & 2 ? o2 : 0) + (pan & 4 ? o3 : 0) + (pan & 8 ? o4 : 0);
     // 各チャンネル 0〜15、左右の音量 1〜8 → だいたい 0〜0.5 に（ファミコンと同じくらいの大きさ）
-    return (left * (((vol >> 4) & 7) + 1) + right * ((vol & 7) + 1)) / (15 * 4 * 8 * 2 * 2);
+    this.mixL = (left * (((vol >> 4) & 7) + 1)) / (15 * 4 * 8 * 2);
+    this.mixR = (right * ((vol & 7) + 1)) / (15 * 4 * 8 * 2);
   }
 
   takeSamples(): Float32Array {

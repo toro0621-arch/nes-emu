@@ -278,3 +278,49 @@ describe('ゲームボーイのどこでもセーブ', () => {
     expect(fp(other)).toBe(want);
   });
 });
+
+// ---- ステレオ・色づけ ----
+
+describe('ゲームボーイのステレオと色づけ', () => {
+  it('左だけに振った音は左から出る', async () => {
+    const { GbApu } = await import('../src/gb/apu');
+    const apu = new GbApu();
+    apu.stereo = true;
+    apu.write(0xff25, 0x10); // 矩形波 1 を左だけ
+    apu.write(0xff12, 0xf0);
+    apu.write(0xff13, 0x00);
+    apu.write(0xff14, 0x87);
+    for (let i = 0; i < 40000; i++) apu.advance(4);
+    const s = apu.takeSamples();
+    let l = 0;
+    let r = 0;
+    for (let i = 0; i < s.length; i += 2) {
+      l += Math.abs(s[i]);
+      r += Math.abs(s[i + 1]);
+    }
+    expect(l).toBeGreaterThan(r * 10);
+    // 広がり 0 ならモノラル（左右同じ）
+    apu.spread = 0;
+    for (let i = 0; i < 40000; i++) apu.advance(4);
+    const m = apu.takeSamples();
+    // （切り替えの直後は直流を落とすフィルタのぶん少しずれるので、最後で比べる）
+    expect(Math.abs(m[m.length - 2] - m[m.length - 1])).toBeLessThan(1e-3);
+  });
+
+  it('白黒のソフトに色をつけ、どこでもセーブのあとも色が残る', async () => {
+    const rom = load('dmg_sound.gb'); // 白黒専用のソフト
+    if (!rom) return;
+    const { GB_PALETTES } = await import('../src/gb/palettes');
+    const { toAbgr } = await import('../src/gb/ppu');
+    const m = createMachine(rom);
+    expect(m.colorable).toBe(true);
+    const state = m.saveState();
+    m.setPalette('blue');
+    for (let f = 0; f < 60; f++) m.runFrame();
+    const blue = GB_PALETTES.find((p) => p.id === 'blue')!.bg.map(toAbgr);
+    expect(Array.from(m.frameBuffer).some((c) => blue.slice(1).includes(c) || c === blue[0])).toBe(true);
+    m.loadState(state);
+    m.runFrame();
+    expect(m.frameBuffer.every((c) => !DMG_COLORS.slice(1).includes(c))).toBe(true);
+  });
+});

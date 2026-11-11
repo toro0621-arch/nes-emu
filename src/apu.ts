@@ -370,8 +370,18 @@ export class Apu {
   private hpOut = 0;
   private lpOut = 0;
   /** 出力した音（呼び出し側が取り出す） */
-  samples = new Float32Array(4096);
+  samples = new Float32Array(8192);
   sampleLength = 0;
+  /**
+   * true なら左・右を交互に出す（アプリ用）。false ならモノラル（テスト用）
+   * spread：ステレオの広がり（0 = 真ん中、1 = 矩形波 1 を左、2 を右へ寄せる）
+   */
+  stereo = false;
+  spread = 0;
+  private sampleSumR = 0;
+  private hpPrevR = 0;
+  private hpOutR = 0;
+  private lpOutR = 0;
   /** カートリッジの拡張音源（なければ null） */
   expansion: (() => number) | null = null;
 
@@ -506,10 +516,22 @@ export class Apu {
   }
 
   private mixSample(): void {
-    this.sampleSum +=
-      PULSE_MIX[this.pulse1.output() + this.pulse2.output()] +
+    const p1 = this.pulse1.output();
+    const p2 = this.pulse2.output();
+    const pulse = PULSE_MIX[p1 + p2];
+    const center =
       TND_MIX[3 * this.triangle.output() + 2 * this.noise.output() + this.dmc.level] +
       (this.expansion ? this.expansion() : 0);
+    if (this.stereo && this.spread && p1 + p2) {
+      // 矩形波の合計を、矩形波 1 は左寄り・2 は右寄りに分ける（全体の大きさは変えない）
+      const l1 = 0.5 + 0.3 * this.spread;
+      const left = (2 * pulse * (p1 * l1 + p2 * (1 - l1))) / (p1 + p2);
+      this.sampleSum += left + center;
+      this.sampleSumR += 2 * pulse - left + center;
+    } else {
+      this.sampleSum += pulse + center;
+      this.sampleSumR += pulse + center;
+    }
     this.sampleCount++;
     this.sampleAcc += 2 * this.sampleRate * this.rateAdjust;
     if (this.sampleAcc < CPU_HZ) return;
@@ -517,12 +539,24 @@ export class Apu {
 
     // その間の平均をとり（簡単なローパス）、実機と同じように直流分を落とす
     const x = this.sampleSum / this.sampleCount;
+    const xr = this.sampleSumR / this.sampleCount;
     this.sampleSum = 0;
+    this.sampleSumR = 0;
     this.sampleCount = 0;
     this.hpOut = 0.996 * (this.hpOut + x - this.hpPrev); // 約 30Hz のハイパス
     this.hpPrev = x;
     this.lpOut += 0.6 * (this.hpOut - this.lpOut); // 約 14kHz のローパス
-    if (this.sampleLength < this.samples.length) this.samples[this.sampleLength++] = this.lpOut;
+    if (!this.stereo) {
+      if (this.sampleLength < this.samples.length) this.samples[this.sampleLength++] = this.lpOut;
+      return;
+    }
+    this.hpOutR = 0.996 * (this.hpOutR + xr - this.hpPrevR);
+    this.hpPrevR = xr;
+    this.lpOutR += 0.6 * (this.hpOutR - this.lpOutR);
+    if (this.sampleLength + 1 < this.samples.length) {
+      this.samples[this.sampleLength++] = this.lpOut;
+      this.samples[this.sampleLength++] = this.lpOutR;
+    }
   }
 
   /** たまった音を取り出す */

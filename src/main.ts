@@ -2,7 +2,10 @@ import { registerSW } from 'virtual:pwa-register';
 import { AudioOutput } from './audio/output';
 import { KeyboardInput } from './input/keyboard';
 import { TouchInput } from './input/touch';
-import { createMachine, type Machine } from './machine';
+import { isGbRom } from './gb/cart';
+import { AUTO_ID, GB_PALETTES, MONO_ID, autoPalette } from './gb/palettes';
+import { DMG_COLORS } from './gb/ppu';
+import { createMachine, type Machine, type System } from './machine';
 import type { SaveState } from './savestate';
 import {
   deleteLibrary,
@@ -160,6 +163,8 @@ async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: b
   // ゲーム一覧に入れる（最後に遊んだ時刻を更新）と、次に開いたときに読み込む ROM として覚える
   void putLibrary({ id, name, data, lastPlayed: Date.now() });
   void saveLastRom({ name, data });
+  next.setStereo(stereo ? 1 : 0);
+  next.setPalette(paletteFor(id));
   bindScreen(next);
   message.textContent = '';
   resetButton.disabled = false;
@@ -258,7 +263,100 @@ menu.addEventListener('click', (e) => {
   if (e.target === menu) closeMenu();
 });
 
+// ---- ステレオ ----
+const STEREO_KEY = 'nes-emu:stereo';
+let stereo = true;
+try {
+  stereo = localStorage.getItem(STEREO_KEY) !== '0';
+} catch {
+  // 無視
+}
+const stereoButton = $<HTMLButtonElement>('stereo');
+const showStereo = () => {
+  stereoButton.textContent = stereo ? 'ステレオ：オン' : 'ステレオ：オフ';
+  stereoButton.classList.toggle('accent', stereo);
+  stereoButton.setAttribute('aria-pressed', String(stereo));
+};
+showStereo();
+stereoButton.addEventListener('click', () => {
+  stereo = !stereo;
+  try {
+    localStorage.setItem(STEREO_KEY, stereo ? '1' : '0');
+  } catch {
+    // 無視
+  }
+  machine?.setStereo(stereo ? 1 : 0);
+  showStereo();
+});
+
+// ---- ゲームボーイの色づけ（ソフトごとに覚える。最初は「おまかせ」） ----
+const PALETTE_KEY = 'nes-emu:gbpal:';
+const colorSection = $('color-section');
+const palettesEl = $('palettes');
+
+function paletteFor(id: string): string {
+  try {
+    return localStorage.getItem(PALETTE_KEY + id) ?? AUTO_ID;
+  } catch {
+    return AUTO_ID;
+  }
+}
+
+const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+const dmgHex = (abgr: number) => hex(((abgr & 0xff) << 16) | (abgr & 0xff00) | ((abgr >> 16) & 0xff));
+
+function renderPalettes(): void {
+  palettesEl.replaceChildren();
+  const id = currentId;
+  colorSection.hidden = !machine?.colorable || !id;
+  if (colorSection.hidden || !id) return;
+  const chosen = paletteFor(id);
+  const options: { id: string; name: string; colors: string[] }[] = [
+    {
+      id: AUTO_ID,
+      name: 'おまかせ',
+      colors: GB_PALETTES.find((p) => p.id === autoPalette(gbTitle()))!.bg.map(hex),
+    },
+    { id: MONO_ID, name: '白黒（液晶）', colors: Array.from(DMG_COLORS, dmgHex) },
+    ...GB_PALETTES.map((p) => ({ id: p.id, name: p.name, colors: p.bg.map(hex) })),
+  ];
+  for (const o of options) {
+    const b = button(
+      '',
+      () => {
+        try {
+          localStorage.setItem(PALETTE_KEY + id, o.id);
+        } catch {
+          // 無視
+        }
+        machine?.setPalette(o.id);
+        renderPalettes();
+      },
+      'btn' + (o.id === chosen ? ' selected' : ''),
+    );
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    for (const c of o.colors) {
+      const i = document.createElement('i');
+      i.style.background = c;
+      sw.append(i);
+    }
+    const label = document.createElement('span');
+    label.textContent = o.name;
+    b.append(sw, label);
+    palettesEl.append(b);
+  }
+}
+
+/** 遊んでいるゲームボーイのソフトの題名（ヘッダー） */
+function gbTitle(): string {
+  const data = currentRom?.data;
+  if (!data) return '';
+  return String.fromCharCode(...data.subarray(0x134, 0x143)).replace(/\0.*$/s, '').trim();
+}
+
 async function openMenu(): Promise<void> {
+  renderPalettes();
   menuOpen = true; // 開いている間はゲームを止める
   menu.hidden = false;
   await Promise.all([renderSlots(), renderLibrary()]);
@@ -372,11 +470,64 @@ async function doLoad(slot: number): Promise<void> {
   showToast(`スロット ${slot} をロードしました`);
 }
 
+// ゲーム一覧はフォルダ式：最初に本体ごとのフォルダ、開くとその本体のゲーム
+const FOLDERS: { system: System; name: string; icon: string }[] = [
+  { system: 'nes', name: 'ファミコン', icon: '🎮' },
+  { system: 'gb', name: 'ゲームボーイ', icon: '🕹️' },
+];
+/** 開いているフォルダ（null ならフォルダの一覧） */
+let openFolder: System | null = null;
+
+function systemOf(data: Uint8Array): System | null {
+  if (data[0] === 0x4e && data[1] === 0x45 && data[2] === 0x53 && data[3] === 0x1a) return 'nes';
+  return isGbRom(data) ? 'gb' : null;
+}
+
 async function renderLibrary(): Promise<void> {
   const list = await listLibrary();
   libraryEl.replaceChildren();
-  libraryHint.textContent = list.length ? '' : 'まだありません。「ROM を追加」からゲームのファイルを選んでください';
-  for (const entry of list) libraryEl.append(libraryRow(entry));
+  if (!list.length) {
+    libraryHint.textContent = 'まだありません。「ROM を追加」からゲームのファイルを選んでください';
+    return;
+  }
+  libraryHint.textContent = '';
+  if (openFolder === null) {
+    for (const f of FOLDERS) {
+      const games = list.filter((e) => systemOf(e.data) === f.system);
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.className = 'btn play folder';
+      const name = document.createElement('span');
+      name.textContent = `${f.icon} ${f.name}`;
+      const count = document.createElement('small');
+      const playing = machine?.system === f.system ? '・プレイ中のゲームあり' : '';
+      count.textContent = `${games.length} 本${playing}`;
+      b.append(name, count);
+      b.addEventListener('click', () => {
+        openFolder = f.system;
+        void renderLibrary();
+      });
+      li.append(b);
+      libraryEl.append(li);
+    }
+    return;
+  }
+  const folder = FOLDERS.find((f) => f.system === openFolder)!;
+  const back = document.createElement('li');
+  back.className = 'folder-head';
+  back.append(
+    button('← フォルダ一覧', () => {
+      openFolder = null;
+      void renderLibrary();
+    }),
+  );
+  const title = document.createElement('span');
+  title.textContent = `${folder.icon} ${folder.name}`;
+  back.append(title);
+  libraryEl.append(back);
+  const games = list.filter((e) => systemOf(e.data) === openFolder);
+  if (!games.length) libraryHint.textContent = 'このフォルダにはまだゲームがありません';
+  for (const entry of games) libraryEl.append(libraryRow(entry));
 }
 
 function libraryRow(entry: LibraryEntry): HTMLLIElement {
@@ -416,8 +567,13 @@ ffButton.addEventListener('click', () => {
 
 /** 早送り中の音は、間引いて高く速く鳴らす */
 function decimate(samples: Float32Array, n: number): Float32Array {
-  const out = new Float32Array(Math.floor(samples.length / n));
-  for (let i = 0; i < out.length; i++) out[i] = samples[i * n];
+  // 左・右が交互に並んでいるので、1 組ずつ間引く
+  const frames = Math.floor(samples.length / 2 / n);
+  const out = new Float32Array(frames * 2);
+  for (let i = 0; i < frames; i++) {
+    out[i * 2] = samples[i * n * 2];
+    out[i * 2 + 1] = samples[i * n * 2 + 1];
+  }
   return out;
 }
 

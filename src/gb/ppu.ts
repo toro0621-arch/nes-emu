@@ -10,6 +10,9 @@ const abgr = (rgb: number) => (0xff000000 | ((rgb & 0xff) << 16) | (rgb & 0xff00
 /** 白黒ゲームボーイの 4 色（明るい順。昔の液晶っぽい緑） */
 export const DMG_COLORS = Uint32Array.from([0xe0f8d0, 0x88c070, 0x346856, 0x081820], abgr);
 
+/** 0xRRGGBB → ABGR */
+export const toAbgr = abgr;
+
 /** ゲームボーイカラーの 15 ビット色 → ABGR（液晶らしく少しだけ色を混ぜて、どぎつさを抑える） */
 function cgbColor(c: number): number {
   const r = c & 31;
@@ -56,6 +59,10 @@ export class GbPpu {
   ocps = 0;
   private bgColors = new Uint32Array(32);
   private objColors = new Uint32Array(32);
+  /** 白黒のソフトの 4 色（背景・スプライト 0・スプライト 1）。色をつけるときはここを変える */
+  readonly dmgBg = DMG_COLORS.slice();
+  readonly dmgObj0 = DMG_COLORS.slice();
+  readonly dmgObj1 = DMG_COLORS.slice();
   /** OPRI：1 なら白黒と同じく X 座標でスプライトの優先順位を決める */
   opri = 0;
 
@@ -142,7 +149,7 @@ export class GbPpu {
           this.dot = 0;
           this.mode = 0;
           this.offDots = 0;
-          this.frameBuffer.fill(this.cgb ? 0xffffffff : DMG_COLORS[0]);
+          this.frameBuffer.fill(this.cgb ? 0xffffffff : this.dmgBg[0]);
         } else if (!wasOn && this.on) {
           this.line = 0;
           this.ly = 0;
@@ -315,6 +322,7 @@ export class GbPpu {
     const bgPrio = this.bgPrio;
     const bgp = this.bgp;
     const signed = (lcdc & 0x10) === 0;
+    const dmgBg = this.dmgBg;
 
     /** 背景かウィンドウの 1 タイル分（x0 から w ドット、タイルの中の横位置は fx から） */
     const drawTiles = (mapBase: number, srcY: number, srcX: number, from: number) => {
@@ -336,7 +344,7 @@ export class GbPpu {
           const idx = (((hi >> bit) & 1) << 1) | ((lo >> bit) & 1);
           bgIdx[x] = idx;
           bgPrio[x] = attr & 0x80 ? 1 : 0;
-          fb[row + x] = cgb ? this.bgColors[pal + idx] : DMG_COLORS[(bgp >> (idx * 2)) & 3];
+          fb[row + x] = cgb ? this.bgColors[pal + idx] : dmgBg[(bgp >> (idx * 2)) & 3];
         }
       }
     };
@@ -353,7 +361,7 @@ export class GbPpu {
     } else {
       bgIdx.fill(0);
       bgPrio.fill(0);
-      fb.fill(DMG_COLORS[0], row, row + GB_W);
+      fb.fill(dmgBg[0], row, row + GB_W);
     }
 
     // スプライト：このラインにかかる最初の 10 個
@@ -395,7 +403,7 @@ export class GbPpu {
         if (masterPrio && bgIdx[sx] !== 0 && (attr & 0x80 || (cgb && bgPrio[sx]))) continue;
         fb[row + sx] = cgb
           ? this.objColors[(attr & 7) * 4 + idx]
-          : DMG_COLORS[((attr & 0x10 ? this.obp1 : this.obp0) >> (idx * 2)) & 3];
+          : (attr & 0x10 ? this.dmgObj1 : this.dmgObj0)[((attr & 0x10 ? this.obp1 : this.obp0) >> (idx * 2)) & 3];
       }
     }
   }

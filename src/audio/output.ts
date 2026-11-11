@@ -31,7 +31,7 @@ export class AudioOutput {
     void ctx.resume();
     this.starting = (async () => {
       await ctx.audioWorklet.addModule(workletUrl);
-      const node = new AudioWorkletNode(ctx, 'nes-audio', { numberOfInputs: 0, outputChannelCount: [1] });
+      const node = new AudioWorkletNode(ctx, 'nes-audio', { numberOfInputs: 0, outputChannelCount: [2] });
       node.port.onmessage = (e: MessageEvent<{ queued: number; underruns: number }>) => {
         this.queued = e.data.queued;
         this.underruns = e.data.underruns;
@@ -52,7 +52,7 @@ export class AudioOutput {
 
   push(samples: Float32Array): void {
     if (!this.node || samples.length === 0) return;
-    this.queued += samples.length;
+    this.queued += samples.length >> 1; // 左右 1 組で 1
     this.node.port.postMessage(samples, [samples.buffer]);
   }
 

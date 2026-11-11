@@ -2,6 +2,7 @@
 import { BUTTON } from './controller';
 import { Gb } from './gb/gb';
 import { isGbRom } from './gb/cart';
+import { applyGbPalette } from './gb/palettes';
 import { GB_H, GB_W } from './gb/ppu';
 import { Nes } from './nes';
 import { SCREEN_H, SCREEN_W } from './ppu';
@@ -22,6 +23,12 @@ export interface Machine {
   setButtons(b: number): void;
   takeSamples(): Float32Array;
   setAudio(sampleRate: number, rateAdjust: number): void;
+  /** ステレオの広がり（0 = モノラル、1 = ステレオ）。音は左・右が交互に出てくる */
+  setStereo(spread: number): void;
+  /** 白黒のゲームボーイのソフトで、色をつけられるか */
+  readonly colorable: boolean;
+  /** 色づけのパレット（palettes.ts の id） */
+  setPalette(id: string): void;
   reset(): void;
   /** バッテリーバックアップのセーブデータ（なければ null） */
   readonly saveRam: Uint8Array | null;
@@ -44,10 +51,16 @@ class NesMachine implements Machine {
   readonly width = SCREEN_W;
   readonly height = SCREEN_H;
   readonly crop = 8;
+  readonly colorable = false;
   readonly nes: Nes;
+  setPalette() {}
 
   constructor(data: Uint8Array) {
     this.nes = new Nes(data);
+    this.nes.apu.stereo = true;
+  }
+  setStereo(spread: number) {
+    this.nes.apu.spread = spread;
   }
   get frameBuffer() {
     return this.nes.ppu.frameBuffer;
@@ -94,8 +107,23 @@ class GbMachine implements Machine {
   gb: Gb;
   private buttons = 0;
 
+  private spread = 1;
+  private palette = 'auto';
+  get colorable() {
+    return !this.gb.cgb;
+  }
+  setPalette(id: string) {
+    this.palette = id;
+    if (!this.gb.cgb) applyGbPalette(this.gb.ppu, id, this.gb.cart.title);
+  }
+
   constructor(private readonly data: Uint8Array) {
     this.gb = new Gb(data);
+    this.gb.apu.stereo = true;
+  }
+  setStereo(spread: number) {
+    this.spread = spread;
+    this.gb.apu.spread = spread;
   }
   get frameBuffer() {
     return this.gb.ppu.frameBuffer;
@@ -125,6 +153,9 @@ class GbMachine implements Machine {
     (next.cart.saveRam ?? next.cart.ram).set(ram);
     next.cart.loadRtc();
     next.setButtons(this.buttons);
+    next.apu.stereo = true;
+    if (!next.cgb) applyGbPalette(next.ppu, this.palette, next.cart.title);
+    next.apu.spread = this.spread;
     next.apu.sampleRate = old.apu.sampleRate;
     next.apu.rateAdjust = old.apu.rateAdjust;
     this.gb = next;
@@ -152,6 +183,7 @@ class GbMachine implements Machine {
   loadState(s: SaveState) {
     applyState(s, 'gb', this.gb.cart.type, this.parts());
     this.gb.ppu.refreshPalettes();
+    this.setPalette(this.palette);
     this.gb.cart.saveDirty = this.gb.cart.saveRam !== null;
   }
 }

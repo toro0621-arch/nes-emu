@@ -461,3 +461,47 @@ html.landscape .menu-panel {
   font-size: 12px;
   white-space: nowrap;
 }
+
+/* ゲーム一覧のフォルダ */
+#library .folder span {
+  font-weight: 700;
+}
+#library li.folder-head {
+  justify-content: flex-start;
+  gap: 12px;
+  font-weight: 700;
+  font-size: 14px;
+}
+#library li.folder-head .btn {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+/* ゲームボーイの色づけ */
+#palettes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+#palettes .btn {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  padding: 7px;
+  font-size: 12px;
+}
+#palettes .btn.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+#palettes .swatch {
+  display: flex;
+  height: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid #34344a;
+}
+#palettes .swatch i {
+  flex: 1;
+}
