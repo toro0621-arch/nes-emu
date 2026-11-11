@@ -2,10 +2,9 @@ import { registerSW } from 'virtual:pwa-register';
 import { AudioOutput } from './audio/output';
 import { KeyboardInput } from './input/keyboard';
 import { TouchInput } from './input/touch';
-import { isGbRom } from './gb/cart';
 import { AUTO_ID, GB_PALETTES, MONO_ID, autoPalette } from './gb/palettes';
 import { DMG_COLORS } from './gb/ppu';
-import { createMachine, type Machine, type System } from './machine';
+import { createMachine, detectSystem, type Machine, type System } from './machine';
 import type { SaveState } from './savestate';
 import {
   deleteLibrary,
@@ -23,7 +22,6 @@ import {
 } from './storage';
 import { keepScreenOn } from './wakelock';
 
-const FRAME_MS = 1000 / 60.0988; // NTSC の NES のフレームレート
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('screen');
@@ -91,7 +89,7 @@ function bindScreen(m: Machine): void {
 }
 
 /** ファイル名から拡張子を取る */
-const baseName = (name: string) => name.replace(/\.(nes|gbc?)$/i, '');
+const baseName = (name: string) => name.replace(/\.(nes|gbc?|wsc?)$/i, '');
 
 // ---- 音 ----
 const audio = new AudioOutput();
@@ -134,7 +132,7 @@ async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: b
   await flushSave(); // 前の ROM のセーブを書き出しておく
   let next: Machine;
   try {
-    next = createMachine(data);
+    next = createMachine(data, name);
   } catch (e) {
     machine = null;
     currentId = null;
@@ -474,13 +472,13 @@ async function doLoad(slot: number): Promise<void> {
 const FOLDERS: { system: System; name: string; icon: string }[] = [
   { system: 'nes', name: 'ファミコン', icon: '🎮' },
   { system: 'gb', name: 'ゲームボーイ', icon: '🕹️' },
+  { system: 'ws', name: 'ワンダースワン', icon: '📟' },
 ];
 /** 開いているフォルダ（null ならフォルダの一覧） */
 let openFolder: System | null = null;
 
-function systemOf(data: Uint8Array): System | null {
-  if (data[0] === 0x4e && data[1] === 0x45 && data[2] === 0x53 && data[3] === 0x1a) return 'nes';
-  return isGbRom(data) ? 'gb' : null;
+function systemOf(entry: { data: Uint8Array; name: string }): System | null {
+  return detectSystem(entry.data, entry.name);
 }
 
 async function renderLibrary(): Promise<void> {
@@ -493,7 +491,7 @@ async function renderLibrary(): Promise<void> {
   libraryHint.textContent = '';
   if (openFolder === null) {
     for (const f of FOLDERS) {
-      const games = list.filter((e) => systemOf(e.data) === f.system);
+      const games = list.filter((e) => systemOf(e) === f.system);
       const li = document.createElement('li');
       const b = document.createElement('button');
       b.className = 'btn play folder';
@@ -525,7 +523,7 @@ async function renderLibrary(): Promise<void> {
   title.textContent = `${folder.icon} ${folder.name}`;
   back.append(title);
   libraryEl.append(back);
-  const games = list.filter((e) => systemOf(e.data) === openFolder);
+  const games = list.filter((e) => systemOf(e) === openFolder);
   if (!games.length) libraryHint.textContent = 'このフォルダにはまだゲームがありません';
   for (const entry of games) libraryEl.append(libraryRow(entry));
 }
@@ -588,6 +586,8 @@ function loop(now: number): void {
   last = now;
   if (machine && image && !document.hidden && !menuOpen) {
     const speed = fastForward ? FF_SPEED : 1;
+    // 本体ごとのフレームレート（ファミコン 60.1、ゲームボーイ 59.7、ワンダースワン 75.5）で進める
+    const FRAME_MS = 1000 / machine.fps;
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);
     let ran = false;
     // 半フレーム分たまったら 1 フレーム進める（60Hz 画面で毎回 1 フレームになるように）

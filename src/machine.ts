@@ -7,11 +7,23 @@ import { GB_H, GB_W } from './gb/ppu';
 import { Nes } from './nes';
 import { SCREEN_H, SCREEN_W } from './ppu';
 import { applyState, captureState, loadState, saveState, type SaveState } from './savestate';
+import { WS_H, WS_W } from './ws/display';
+import { isWsRom, Ws } from './ws/ws';
 
-export type System = 'nes' | 'gb';
+export type System = 'nes' | 'gb' | 'ws';
+
+/** ROM の中身（とファイル名）から本体を決める。わからなければ null */
+export function detectSystem(data: Uint8Array, name = ''): System | null {
+  if (data[0] === 0x4e && data[1] === 0x45 && data[2] === 0x53 && data[3] === 0x1a) return 'nes';
+  if (isGbRom(data)) return 'gb';
+  if (/\.wsc?$/i.test(name) || isWsRom(data)) return 'ws';
+  return null;
+}
 
 export interface Machine {
   readonly system: System;
+  /** 1 秒あたりのフレーム数 */
+  readonly fps: number;
   /** 画面の大きさ（frameBuffer の幅・高さ）と、上下左右から切り落とす幅 */
   readonly width: number;
   readonly height: number;
@@ -39,15 +51,22 @@ export interface Machine {
   loadState(state: SaveState): void;
 }
 
-/** ROM の中身から本体を決めて作る（どちらでもなければ例外） */
-export function createMachine(data: Uint8Array): Machine {
-  if (data[0] === 0x4e && data[1] === 0x45 && data[2] === 0x53 && data[3] === 0x1a) return new NesMachine(data);
-  if (isGbRom(data)) return new GbMachine(data);
-  throw new Error('ファミコン（.nes）かゲームボーイ（.gb / .gbc）の ROM を選んでください');
+/** ROM の中身から本体を決めて作る（どれでもなければ例外） */
+export function createMachine(data: Uint8Array, name = ''): Machine {
+  switch (detectSystem(data, name)) {
+    case 'nes':
+      return new NesMachine(data);
+    case 'gb':
+      return new GbMachine(data);
+    case 'ws':
+      return new WsMachine(data);
+  }
+  throw new Error('ファミコン（.nes）・ゲームボーイ（.gb / .gbc）・ワンダースワン（.ws / .wsc）の ROM を選んでください');
 }
 
 class NesMachine implements Machine {
   readonly system = 'nes';
+  readonly fps = 60.0988;
   readonly width = SCREEN_W;
   readonly height = SCREEN_H;
   readonly crop = 8;
@@ -101,6 +120,7 @@ class NesMachine implements Machine {
 
 class GbMachine implements Machine {
   readonly system = 'gb';
+  readonly fps = 59.7275;
   readonly width = GB_W;
   readonly height = GB_H;
   readonly crop = 0;
@@ -185,5 +205,115 @@ class GbMachine implements Machine {
     this.gb.ppu.refreshPalettes();
     this.setPalette(this.palette);
     this.gb.cart.saveDirty = this.gb.cart.saveRam !== null;
+  }
+}
+
+/**
+ * ワンダースワン。縦持ちのソフトは画面を 90° 回して出し、十字キーを Y ボタンに、A・B を X ボタンに割り当てる
+ */
+class WsMachine implements Machine {
+  readonly system = 'ws';
+  readonly fps = 75.47;
+  readonly crop = 0;
+  readonly colorable = false;
+  readonly width: number;
+  readonly height: number;
+  readonly frameBuffer: Uint32Array<ArrayBuffer>;
+  ws: Ws;
+  private readonly vertical: boolean;
+  private spread = 1;
+  private keys = 0;
+
+  constructor(private readonly data: Uint8Array) {
+    this.ws = new Ws(data);
+    this.ws.sound.stereo = true;
+    this.vertical = this.ws.header.vertical;
+    this.width = this.vertical ? WS_H : WS_W;
+    this.height = this.vertical ? WS_W : WS_H;
+    this.frameBuffer = this.vertical ? new Uint32Array(WS_W * WS_H) : this.ws.display.frameBuffer;
+  }
+  setPalette() {}
+  runFrame() {
+    this.ws.runFrame();
+    if (!this.vertical) return;
+    // 本体を左に 90° 倒して持つ向き：画面の上の行が左の列になる
+    const src = this.ws.display.frameBuffer;
+    const dst = this.frameBuffer;
+    for (let y = 0; y < WS_W; y++) {
+      const sx = WS_W - 1 - y;
+      for (let x = 0; x < WS_H; x++) dst[y * WS_H + x] = src[x * WS_W + sx];
+    }
+  }
+  setButtons(b: number) {
+    const up = b & BUTTON.UP ? 1 : 0;
+    const right = b & BUTTON.RIGHT ? 1 : 0;
+    const down = b & BUTTON.DOWN ? 1 : 0;
+    const left = b & BUTTON.LEFT ? 1 : 0;
+    let k = 0;
+    if (!this.vertical) {
+      // X1〜X4 = ↑ → ↓ ←、A、B、START
+      k = up | (right << 1) | (down << 2) | (left << 3);
+      if (b & BUTTON.A) k |= 1 << 9;
+      if (b & BUTTON.B) k |= 1 << 10;
+    } else {
+      // 縦持ち：Y1〜Y4 は 左 ↑ → ↓ に見える。A = X3（右）、B = X4（下）、SELECT = A ボタン
+      k = (left | (up << 1) | (right << 2) | (down << 3)) << 4;
+      if (b & BUTTON.A) k |= 1 << 2;
+      if (b & BUTTON.B) k |= 1 << 3;
+      if (b & BUTTON.SELECT) k |= 1 << 9;
+    }
+    if (b & BUTTON.START) k |= 1 << 8;
+    this.keys = k;
+    this.ws.setKeys(k);
+  }
+  takeSamples() {
+    return this.ws.sound.takeSamples();
+  }
+  setAudio(rate: number, adjust: number) {
+    this.ws.sound.sampleRate = rate;
+    this.ws.sound.rateAdjust = adjust;
+  }
+  setStereo(spread: number) {
+    this.spread = spread;
+    this.ws.sound.spread = spread;
+  }
+  reset() {
+    const old = this.ws;
+    const next = new Ws(this.data);
+    const ram = old.saveRam;
+    if (ram) next.saveRam!.set(ram);
+    next.sound.stereo = true;
+    next.sound.spread = this.spread;
+    next.sound.sampleRate = old.sound.sampleRate;
+    next.sound.rateAdjust = old.sound.rateAdjust;
+    next.setKeys(this.keys);
+    this.ws = next;
+    if (!this.vertical) (this as { frameBuffer: Uint32Array<ArrayBuffer> }).frameBuffer = next.display.frameBuffer;
+  }
+  get saveRam() {
+    return this.ws.saveRam;
+  }
+  get saveDirty() {
+    return this.ws.saveDirty;
+  }
+  set saveDirty(v: boolean) {
+    this.ws.saveDirty = v;
+  }
+  afterSaveLoaded() {}
+  private parts(): Record<string, object> {
+    const w = this.ws;
+    return { ws: w, cpu: w.cpu, display: w.display, sound: w.sound };
+  }
+  /** マッパーの番号の代わりに、ROM の大きさとセーブの種類で別のソフトのセーブを見分ける */
+  private id(): number {
+    return this.ws.rom.length + this.ws.header.saveType;
+  }
+  saveState() {
+    const w = this.ws;
+    return captureState('ws', this.id(), this.parts(), new Set<unknown>([w, w.cpu, w.display, w.sound, w.rom]));
+  }
+  loadState(s: SaveState) {
+    applyState(s, 'ws', this.id(), this.parts());
+    this.ws.saveDirty = this.ws.saveRam !== null;
   }
 }

@@ -51,7 +51,8 @@ header {
 }
 #screen-wrap {
   position: relative;
-  width: 100%;
+  /* 縦長の画面（ワンダースワンの縦持ち）でもボタンが入るよう、高さは画面の 55% まで */
+  width: min(100%, calc(55dvh * var(--sw, 240) / var(--sh, 224)));
   max-width: 512px;
   margin: 0 auto;
   aspect-ratio: var(--sw, 240) / var(--sh, 224);
