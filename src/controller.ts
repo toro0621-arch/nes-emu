@@ -8,6 +8,11 @@ export const BUTTON = {
   DOWN: 0x20,
   LEFT: 0x40,
   RIGHT: 0x80,
+  // ワンダースワン用のもう 1 組の十字ボタン（Y ボタン。縦持ちでは X ボタン）
+  EX_UP: 0x100,
+  EX_RIGHT: 0x200,
+  EX_DOWN: 0x400,
+  EX_LEFT: 0x800,
 } as const;
 
 export class Controller {

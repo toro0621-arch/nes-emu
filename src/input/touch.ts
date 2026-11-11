@@ -18,6 +18,8 @@ export class TouchInput {
   private a: HTMLElement;
   private b: HTMLElement;
   private keys: [HTMLElement, number][];
+  /** ワンダースワン用の 4 つのボタン（見えているときだけ） */
+  private extra: [HTMLElement, number][];
 
   /** ページ全体を 90° 回して表示しているか（画面上の向きを、ボタンの向きに直す） */
   rotated = false;
@@ -30,6 +32,12 @@ export class TouchInput {
     this.keys = [
       [q('[data-btn="SELECT"]'), BUTTON.SELECT],
       [q('[data-btn="START"]'), BUTTON.START],
+    ];
+    this.extra = [
+      [q('[data-btn="EX_UP"]'), BUTTON.EX_UP],
+      [q('[data-btn="EX_RIGHT"]'), BUTTON.EX_RIGHT],
+      [q('[data-btn="EX_DOWN"]'), BUTTON.EX_DOWN],
+      [q('[data-btn="EX_LEFT"]'), BUTTON.EX_LEFT],
     ];
 
     root.addEventListener('pointerdown', (e) => {
@@ -80,6 +88,21 @@ export class TouchInput {
     if (Math.min(da, db) < br * 1.5) {
       if (Math.abs(da - db) < br * 0.6) return BUTTON.A | BUTTON.B;
       return da < db ? BUTTON.A : BUTTON.B;
+    }
+
+    // ワンダースワンの Y ボタン（一番近いもの）
+    if (this.extra[0][0].offsetParent !== null) {
+      let best = 0;
+      let bestD = Infinity;
+      for (const [el, m] of this.extra) {
+        const d = distTo(el, x, y);
+        if (d < bestD) {
+          bestD = d;
+          best = m;
+        }
+      }
+      const er = this.extra[0][0].getBoundingClientRect().width / 2;
+      if (bestD < er * 1.4) return best;
     }
 
     for (const [el, m] of this.keys) {

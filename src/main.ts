@@ -87,6 +87,9 @@ function bindScreen(m: Machine): void {
   root.setProperty('--sw', String(w));
   root.setProperty('--sh', String(h));
   document.documentElement.dataset.system = m.system;
+  // ワンダースワンの縦持ちのソフトでは、ひし形のボタンを X ボタンとして表示する
+  if (m.vertical) document.documentElement.dataset.wsvertical = '';
+  else delete document.documentElement.dataset.wsvertical;
 }
 
 /** ファイル名から拡張子を取る */

@@ -82,7 +82,7 @@ describe('ワンダースワン', () => {
     expect(ws.ram[0x102] & 0x0f).toBe(0x02);
   });
 
-  it('縦持ちのソフトは画面を回し、十字キーを Y ボタンに', () => {
+  it('縦持ちのソフトは画面を回し、十字キーを Y ボタンに（ひし形のボタンは X）', () => {
     const m = createMachine(makeRom(program(), { vertical: true }));
     expect(m.width).toBe(144);
     expect(m.height).toBe(224);
@@ -244,5 +244,20 @@ describe('ワンダースワンの音', () => {
     }
     expect(n).toBeGreaterThan(47000);
     expect(n).toBeLessThan(49000);
+  });
+});
+
+describe('ワンダースワンのボタンの割り当て', () => {
+  it('横持ち：十字キー = X、ひし形 = Y、縦持ち：十字キー = Y、ひし形 = X', () => {
+    const keysOf = (vertical: boolean, b: number) => {
+      const m = createMachine(makeRom([0xf4], { vertical }));
+      m.setButtons(b);
+      return (m as unknown as { keys: number }).keys;
+    };
+    expect(keysOf(false, 0x10)).toBe(1); // ↑ = X1
+    expect(keysOf(false, 0x100)).toBe(1 << 4); // ひし形の上 = Y1
+    expect(keysOf(false, 0x01 | 0x02 | 0x08)).toBe((1 << 9) | (1 << 10) | (1 << 8)); // A B START
+    expect(keysOf(true, 0x40)).toBe(1 << 4); // 縦持ちの ← = Y1
+    expect(keysOf(true, 0x100)).toBe(1 << 1); // 縦持ちのひし形の上 = X2
   });
 });

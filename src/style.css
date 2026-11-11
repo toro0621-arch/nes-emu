@@ -506,3 +506,64 @@ html.landscape .menu-panel {
 #palettes .swatch i {
   flex: 1;
 }
+
+/* ---- ワンダースワンの Y ボタン（A・B の上にひし形に 4 つ） ---- */
+#ypad {
+  display: none;
+  position: absolute;
+  right: calc(var(--unit) * 0.6);
+  top: calc(50% - var(--unit) * 2.8);
+  width: calc(var(--unit) * 2.4);
+  height: calc(var(--unit) * 2.4);
+}
+html[data-system='ws'] #ypad {
+  display: block;
+}
+/* ワンダースワンでは A・B を少し下げて、Y ボタンの場所をあける */
+html[data-system='ws'] #ab {
+  top: calc(50% - var(--unit) * 0.3);
+}
+html.landscape[data-system='ws'] #ab {
+  top: calc(58% - var(--unit) * 0.95);
+}
+html.landscape #ypad {
+  right: calc((var(--side) - var(--unit) * 2.4) / 2);
+  top: calc(58% - var(--unit) * 0.95 - var(--unit) * 2.6);
+}
+.round.small {
+  width: calc(var(--unit) * 0.82);
+  height: calc(var(--unit) * 0.82);
+  font-size: calc(var(--unit) * 0.3);
+  background: #6a5acd;
+  box-shadow: 0 2px 0 #3f357f;
+}
+.round.small::after {
+  content: var(--ylabel, 'Y');
+}
+.round.small.pressed {
+  box-shadow: 0 1px 0 #3f357f;
+}
+#ypad [data-btn='EX_UP'] {
+  left: calc(50% - var(--unit) * 0.41);
+  top: 0;
+}
+#ypad [data-btn='EX_DOWN'] {
+  left: calc(50% - var(--unit) * 0.41);
+  bottom: 0;
+}
+#ypad [data-btn='EX_LEFT'] {
+  left: 0;
+  top: calc(50% - var(--unit) * 0.41);
+}
+#ypad [data-btn='EX_RIGHT'] {
+  right: 0;
+  top: calc(50% - var(--unit) * 0.41);
+}
+/* 縦持ちのソフトでは、このひし形が X ボタンになる */
+html[data-wsvertical] .round.small {
+  --ylabel: 'X';
+}
+/* ワンダースワンには SELECT ボタンがない */
+html[data-system='ws'] [data-btn='SELECT'] {
+  visibility: hidden;
+}

@@ -37,6 +37,8 @@ export interface Machine {
   setAudio(sampleRate: number, rateAdjust: number): void;
   /** ステレオの広がり（0 = モノラル、1 = ステレオ）。音は左・右が交互に出てくる */
   setStereo(spread: number): void;
+  /** ワンダースワンの縦持ちのソフトか */
+  readonly vertical?: boolean;
   /** 白黒のゲームボーイのソフトで、色をつけられるか */
   readonly colorable: boolean;
   /** 色づけのパレット（palettes.ts の id） */
@@ -88,7 +90,7 @@ class NesMachine implements Machine {
     this.nes.runFrame();
   }
   setButtons(b: number) {
-    this.nes.bus.pads[0].buttons = b;
+    this.nes.bus.pads[0].buttons = b & 0xff;
   }
   takeSamples() {
     return this.nes.apu.takeSamples();
@@ -155,6 +157,7 @@ class GbMachine implements Machine {
     // ゲームボーイは十字キーの反対どうしも同時に押せてしまうので、ファミコンと同じく打ち消す
     if ((b & (BUTTON.UP | BUTTON.DOWN)) === (BUTTON.UP | BUTTON.DOWN)) b &= ~(BUTTON.UP | BUTTON.DOWN);
     if ((b & (BUTTON.LEFT | BUTTON.RIGHT)) === (BUTTON.LEFT | BUTTON.RIGHT)) b &= ~(BUTTON.LEFT | BUTTON.RIGHT);
+    b &= 0xff;
     this.buttons = b;
     this.gb.setButtons(b);
   }
@@ -220,7 +223,7 @@ class WsMachine implements Machine {
   readonly height: number;
   readonly frameBuffer: Uint32Array<ArrayBuffer>;
   ws: Ws;
-  private readonly vertical: boolean;
+  readonly vertical: boolean;
   private spread = 1;
   private keys = 0;
 
@@ -250,18 +253,21 @@ class WsMachine implements Machine {
     const down = b & BUTTON.DOWN ? 1 : 0;
     const left = b & BUTTON.LEFT ? 1 : 0;
     let k = 0;
+    const eu = b & BUTTON.EX_UP ? 1 : 0;
+    const er = b & BUTTON.EX_RIGHT ? 1 : 0;
+    const ed = b & BUTTON.EX_DOWN ? 1 : 0;
+    const el = b & BUTTON.EX_LEFT ? 1 : 0;
     if (!this.vertical) {
-      // X1〜X4 = ↑ → ↓ ←、A、B、START
+      // 十字キー = X1〜X4（↑ → ↓ ←）、ひし形のボタン = Y1〜Y4
       k = up | (right << 1) | (down << 2) | (left << 3);
-      if (b & BUTTON.A) k |= 1 << 9;
-      if (b & BUTTON.B) k |= 1 << 10;
+      k |= (eu | (er << 1) | (ed << 2) | (el << 3)) << 4;
     } else {
-      // 縦持ち：Y1〜Y4 は 左 ↑ → ↓ に見える。A = X3（右）、B = X4（下）、SELECT = A ボタン
+      // 縦持ち（本体を左に倒す）：Y1〜Y4 は ← ↑ → ↓ に、X1〜X4 も ← ↑ → ↓ に見える
       k = (left | (up << 1) | (right << 2) | (down << 3)) << 4;
-      if (b & BUTTON.A) k |= 1 << 2;
-      if (b & BUTTON.B) k |= 1 << 3;
-      if (b & BUTTON.SELECT) k |= 1 << 9;
+      k |= el | (eu << 1) | (er << 2) | (ed << 3);
     }
+    if (b & BUTTON.A) k |= 1 << 9;
+    if (b & BUTTON.B) k |= 1 << 10;
     if (b & BUTTON.START) k |= 1 << 8;
     this.keys = k;
     this.ws.setKeys(k);

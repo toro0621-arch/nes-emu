@@ -11,6 +11,11 @@ const KEYMAP: Record<string, number> = {
   Enter: BUTTON.START,
   ShiftLeft: BUTTON.SELECT,
   ShiftRight: BUTTON.SELECT,
+  // ワンダースワンの Y ボタン
+  KeyI: BUTTON.EX_UP,
+  KeyL: BUTTON.EX_RIGHT,
+  KeyK: BUTTON.EX_DOWN,
+  KeyJ: BUTTON.EX_LEFT,
 };
 
 export class KeyboardInput {
