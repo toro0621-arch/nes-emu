@@ -571,7 +571,8 @@ function libraryRow(entry: LibraryEntry): HTMLLIElement {
 
 // ---- 早送り ----
 const ffButton = $<HTMLButtonElement>('ff');
-const FF_SPEEDS = [1.5, 2, 3, 4, 6];
+/** 1〜3 倍は 0.25 刻み、その上は 4・6 倍 */
+const FF_SPEEDS = [1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 4, 6];
 const FF_KEY = 'nes-emu:ff-speed';
 let ffSpeed = 3;
 try {
