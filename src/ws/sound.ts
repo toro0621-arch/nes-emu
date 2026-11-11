@@ -28,6 +28,8 @@ export class WsSound {
   private hpOutL = 0;
   private hpPrevR = 0;
   private hpOutR = 0;
+  private lastL = 0;
+  private lastR = 0;
 
   constructor(
     private ram: Uint8Array,
@@ -118,11 +120,15 @@ export class WsSound {
   }
 
   private emit(): void {
-    if (this.count === 0) return;
-    // 最大でだいたい 15 × 15 × 4 + 255 → 0〜0.5 くらいに
-    let l = this.sumL / this.count / 2400;
-    let r = this.sumR / this.count / 2400;
-    this.sumL = this.sumR = this.count = 0;
+    // 最大でだいたい 15 × 15 × 4 + 255 → 0〜0.5 くらいに。
+    // 出力の周波数（48kHz）は音の計算（半ラインごと＝24kHz）より細かいので、間は直前の値をくり返す
+    if (this.count > 0) {
+      this.lastL = this.sumL / this.count / 2400;
+      this.lastR = this.sumR / this.count / 2400;
+      this.sumL = this.sumR = this.count = 0;
+    }
+    let l = this.lastL;
+    let r = this.lastR;
     const m = (l + r) / 2;
     const side = ((l - r) / 2) * (this.stereo ? this.spread : 0);
     l = m + side;

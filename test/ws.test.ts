@@ -232,3 +232,17 @@ describe('ワンダースワンのテスト ROM', () => {
     expect(ok.length).toBeGreaterThanOrEqual(rows.length - 3);
   });
 });
+
+describe('ワンダースワンの音', () => {
+  it('1 秒動かすと、出力の周波数ぶんの音が出る（左右 2 チャンネル）', () => {
+    const m = createMachine(makeRom(program()));
+    m.setAudio(48000, 1);
+    let n = 0;
+    for (let f = 0; f < 75; f++) {
+      m.runFrame();
+      n += m.takeSamples().length / 2;
+    }
+    expect(n).toBeGreaterThan(47000);
+    expect(n).toBeLessThan(49000);
+  });
+});
