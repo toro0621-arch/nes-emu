@@ -16,6 +16,8 @@ const ZTABLE = [
   [3, 7, 1, 5, 0, 0, 0, 0, 2, 4, 6, 8],
   [3, 3, 1, 5, 0, 0, 0, 0, 2, 4, 6, 7],
 ];
+/** モード 1 で BG3 の優先を上げたとき（$2105 の bit3）：BG3 の優先度の高いタイルがいちばん手前 */
+const ZTABLE_M1_BG3 = [6, 9, 5, 8, 1, 13, 0, 0, 2, 4, 7, 10];
 /** モードごとの BG の色ビット数（0 = なし） */
 const BPP = [
   [2, 2, 2, 2],
@@ -458,7 +460,7 @@ export class SnesPpu {
     const mode = this.bgMode;
     const hires = mode === 5 || mode === 6 || (this.setini & 8) !== 0;
     const width = mode === 5 || mode === 6 ? 512 : 256;
-    const z = ZTABLE[mode];
+    const z = mode === 1 && this.bg3Prio ? ZTABLE_M1_BG3 : ZTABLE[mode];
     const bpp = BPP[mode];
     const layers = this.tm | this.ts;
 
