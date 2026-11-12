@@ -11,6 +11,10 @@ for (let c = 0; c < 0x8000; c++) {
   RGB15[c] = 0xff000000 | (((b << 3) | (b >> 2)) << 16) | (((g << 3) | (g >> 2)) << 8) | ((r << 3) | (r >> 2));
 }
 
+/** 5 ビット → 8 ビット */
+const X5 = new Uint8Array(32);
+for (let i = 0; i < 32; i++) X5[i] = (i << 3) | (i >> 2);
+
 /** ディザの表（4 × 4） */
 const DITHER = [-4, 0, -3, 1, 2, -2, 3, -1, -3, 1, -4, 0, 3, -1, 2, -2];
 
@@ -355,7 +359,10 @@ export class Gpu {
     const x = (this.xX + (this.xI % this.xW)) & 1023;
     const y = (this.xY + Math.floor(this.xI / this.xW)) & 511;
     const i = y * 1024 + x;
-    if (!this.checkMask || !(this.vram[i] & 0x8000)) this.vram[i] = px | (this.setMask ? 0x8000 : 0);
+    if (!this.checkMask || !(this.vram[i] & 0x8000)) {
+      this.vram[i] = px | (this.setMask ? 0x8000 : 0);
+      if (this.trueColor) this.hi[i] = 0;
+    }
     this.xI++;
     if (this.xI >= this.xW * this.xH) this.xfer = 0;
   }
@@ -372,6 +379,7 @@ export class Gpu {
     for (let y = 0; y < h; y++) {
       const row = ((y0 + y) & 511) * 1024;
       for (let x = 0; x < w; x++) vr[row + ((x0 + x) & 1023)] = px;
+      if (this.trueColor) for (let x = 0; x < w; x++) this.hi[row + ((x0 + x) & 1023)] = 0;
     }
   }
 
@@ -386,16 +394,71 @@ export class Gpu {
     const vr = this.vram;
     const mask = this.setMask ? 0x8000 : 0;
     const row = new Uint16Array(w);
+    const hrow = this.trueColor ? new Uint32Array(w) : null;
     for (let y = 0; y < h; y++) {
       const s = ((sy + y) & 511) * 1024;
       for (let x = 0; x < w; x++) row[x] = vr[s + ((sx + x) & 1023)];
+      if (hrow) for (let x = 0; x < w; x++) hrow[x] = this.hi[s + ((sx + x) & 1023)];
       const d = ((dy + y) & 511) * 1024;
       for (let x = 0; x < w; x++) {
         const i = d + ((dx + x) & 1023);
         if (this.checkMask && vr[i] & 0x8000) continue;
         vr[i] = row[x] | mask;
+        if (hrow) this.hi[i] = hrow[x];
       }
     }
+  }
+
+  /** 色をなめらかに（ディザを使わず、8 ビットの色のまま画面に出す） */
+  trueColor = false;
+  /** VRAM の点ごとの 8 ビットの色（0 = なし。15 ビットの VRAM の色を使う） */
+  hi = new Uint32Array(1024 * 512);
+
+  setTrueColor(on: boolean): void {
+    this.trueColor = on;
+    this.hi.fill(0);
+  }
+
+  /** 8 ビットの色で 1 点描く（半透明も 8 ビットで計算） */
+  private plotTc(idx: number, dst: number, r: number, g: number, b: number, semi: boolean, mode: number, bits: number): void {
+    if (semi) {
+      const h = this.hi[idx];
+      let dr: number;
+      let dg: number;
+      let db: number;
+      if (h) {
+        dr = h & 0xff;
+        dg = (h >> 8) & 0xff;
+        db = (h >> 16) & 0xff;
+      } else {
+        dr = X5[dst & 31];
+        dg = X5[(dst >> 5) & 31];
+        db = X5[(dst >> 10) & 31];
+      }
+      switch (mode) {
+        case 0:
+          r = (dr + r) >> 1;
+          g = (dg + g) >> 1;
+          b = (db + b) >> 1;
+          break;
+        case 1:
+          r = Math.min(255, dr + r);
+          g = Math.min(255, dg + g);
+          b = Math.min(255, db + b);
+          break;
+        case 2:
+          r = Math.max(0, dr - r);
+          g = Math.max(0, dg - g);
+          b = Math.max(0, db - b);
+          break;
+        default:
+          r = Math.min(255, dr + (r >> 2));
+          g = Math.min(255, dg + (g >> 2));
+          b = Math.min(255, db + (b >> 2));
+      }
+    }
+    this.vram[idx] = (r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10) | bits;
+    this.hi[idx] = 0x1000000 | (b << 16) | (g << 8) | r;
   }
 
   // ---- 描く ----
@@ -492,6 +555,8 @@ export class Gpu {
 
     const vr = this.vram;
     const dith = this.dither && (shaded || (tex && !raw));
+    const tc = this.trueColor;
+    const hi = this.trueColor ? this.hi : null;
     const mode = (tpage >> 5) & 3;
     const tdepth = (tpage >> 7) & 3;
     const tbx = (tpage & 15) * 64;
@@ -547,6 +612,26 @@ export class Gpu {
           } else t = vr[ty + ((tbx + tu) & 1023)];
           if (t === 0) continue;
           transparent = semi && (t & 0x8000) !== 0;
+          if (tc) {
+            // 色をなめらかに：8 ビットのまま計算して、表示用に覚えておく
+            let r8: number;
+            let g8: number;
+            let b8: number;
+            if (raw) {
+              r8 = X5[t & 31];
+              g8 = X5[(t >> 5) & 31];
+              b8 = X5[(t >> 10) & 31];
+            } else {
+              const cr = shaded ? r | 0 : a.r;
+              const cg = shaded ? g | 0 : a.g;
+              const cb = shaded ? bb | 0 : a.b;
+              r8 = Math.min(255, ((t & 31) * cr) >> 4);
+              g8 = Math.min(255, (((t >> 5) & 31) * cg) >> 4);
+              b8 = Math.min(255, (((t >> 10) & 31) * cb) >> 4);
+            }
+            this.plotTc(idx, dst, r8, g8, b8, transparent, mode, (t & 0x8000) | maskOr);
+            continue;
+          }
           if (raw) out = t;
           else {
             const cr = shaded ? r | 0 : a.r;
@@ -558,9 +643,14 @@ export class Gpu {
               (lut[(((t >> 10) & 31) * cb) >> 4] << 10) |
               (t & 0x8000);
           }
+        } else if (tc) {
+          if (shaded) this.plotTc(idx, dst, Math.min(255, r | 0), Math.min(255, g | 0), Math.min(255, bb | 0), transparent, mode, maskOr);
+          else this.plotTc(idx, dst, a.r, a.g, a.b, transparent, mode, maskOr);
+          continue;
         } else if (shaded) out = lut[r | 0] | (lut[g | 0] << 5) | (lut[bb | 0] << 10);
         else out = (a.r >> 3) | ((a.g >> 3) << 5) | ((a.b >> 3) << 10);
         if (transparent) out = blend(dst, out, mode) | (out & 0x8000);
+        if (hi) hi[idx] = 0;
         vr[idx] = out | maskOr;
       }
     }
@@ -669,6 +759,7 @@ export class Gpu {
         } else out = flat;
         if (transparent) out = blend(dst, out, mode) | (out & 0x8000);
         vr[idx] = out | maskOr;
+        if (this.trueColor) this.hi[idx] = 0;
       }
     }
     x0 = y0 = 0;
@@ -741,6 +832,7 @@ export class Gpu {
       let out = lut[r] | (lut[g] << 5) | (lut[b] << 10);
       if (semi) out = blend(dst, out, mode);
       vr[idx] = out | maskOr;
+      if (this.trueColor) this.hi[idx] = 0;
     }
   }
 
@@ -802,12 +894,19 @@ export class Gpu {
     for (let y = 0; y < h; y++) {
       const row = ((sy + y) & 511) * 1024;
       const o = y * w;
-      for (let x = 0; x < w; x++) fb[o + x] = RGB15[vr[row + ((sx + x) & 1023)] & 0x7fff];
+      if (this.trueColor) {
+        const hi = this.hi;
+        for (let x = 0; x < w; x++) {
+          const i = row + ((sx + x) & 1023);
+          const h2 = hi[i];
+          fb[o + x] = h2 ? 0xff000000 | h2 : RGB15[vr[i] & 0x7fff];
+        }
+      } else for (let x = 0; x < w; x++) fb[o + x] = RGB15[vr[row + ((sx + x) & 1023)] & 0x7fff];
     }
   }
 
   stateSkip(): unknown[] {
-    return [this.frameBuffer];
+    return [this.frameBuffer, this.hi];
   }
 }
 

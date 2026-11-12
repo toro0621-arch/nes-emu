@@ -221,6 +221,7 @@ async function startRom(
   next.setStereo(stereo ? 1 : 0);
   next.setPalette(paletteFor(id));
   next.setLcdColor?.(lcdColor);
+  applyPsxSettings(next);
   bindScreen(next);
   message.textContent = '';
   resetButton.disabled = false;
@@ -544,6 +545,52 @@ savFile.addEventListener('change', async () => {
   showToast(started?.loadedSave ? 'セーブデータを読み込みました' : 'セーブデータを読み込めませんでした');
 });
 
+// ---- プレイステーションの設定（全部のソフトで共通。最初はどちらもオン） ----
+const PSX_FAST_KEY = 'nes-emu:psx-fastcd';
+const PSX_TC_KEY = 'nes-emu:psx-truecolor';
+const loadFlag = (k: string) => {
+  try {
+    return localStorage.getItem(k) !== '0';
+  } catch {
+    return true;
+  }
+};
+let psxFastCd = loadFlag(PSX_FAST_KEY);
+let psxTrueColor = loadFlag(PSX_TC_KEY);
+function applyPsxSettings(m: Machine | null): void {
+  if (m?.system !== 'psx') return;
+  (m as PsxMachine).setFastCd(psxFastCd);
+  (m as PsxMachine).setTrueColor(psxTrueColor);
+}
+function renderPsxSettings(): void {
+  $('psx-section').hidden = machine?.system !== 'psx';
+  for (const [id, on] of [
+    ['psx-fastcd', psxFastCd],
+    ['psx-truecolor', psxTrueColor],
+  ] as const) {
+    const b = $<HTMLButtonElement>(id);
+    b.textContent = on ? 'オン' : 'オフ';
+    b.classList.toggle('accent', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+}
+for (const [id, key] of [
+  ['psx-fastcd', PSX_FAST_KEY],
+  ['psx-truecolor', PSX_TC_KEY],
+] as const) {
+  $(id).addEventListener('click', () => {
+    if (id === 'psx-fastcd') psxFastCd = !psxFastCd;
+    else psxTrueColor = !psxTrueColor;
+    try {
+      localStorage.setItem(key, (id === 'psx-fastcd' ? psxFastCd : psxTrueColor) ? '1' : '0');
+    } catch {
+      // 無視
+    }
+    applyPsxSettings(machine);
+    renderPsxSettings();
+  });
+}
+
 // ---- プレイステーションのディスクの入れかえ ----
 $<HTMLInputElement>('disc-file').addEventListener('change', async (e) => {
   const input = e.target as HTMLInputElement;
@@ -688,6 +735,7 @@ async function openMenu(): Promise<void> {
   renderSmooth();
   renderFfSpeeds();
   void renderBios();
+  renderPsxSettings();
   $('disc-section').hidden = machine?.system !== 'psx' || !currentFiles;
   menuOpen = true; // 開いている間はゲームを止める
   menu.hidden = false;

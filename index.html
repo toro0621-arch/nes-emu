@@ -56,6 +56,28 @@
             </label>
           </div>
         </section>
+        <section id="psx-section" hidden>
+          <div class="menu-row">
+            <h2>読み込みを速く</h2>
+            <button class="btn" id="psx-fastcd" aria-pressed="false">オフ</button>
+          </div>
+          <p class="hint">CD の読み込み待ちを短くします（声や音楽が流れている間はふつうの速さ）。ゲームがおかしくなったらオフに</p>
+          <div class="menu-row">
+            <h2>色をなめらかに</h2>
+            <button class="btn" id="psx-truecolor" aria-pressed="false">オフ</button>
+          </div>
+          <p class="hint">3D の色のザラザラ（ディザ）を消して、きれいなグラデーションにします</p>
+        </section>
+        <section id="disc-section" hidden>
+          <h2>ディスクの入れかえ</h2>
+          <p class="hint">何枚組のゲームで「ディスク 2 を入れてください」と出たら、次のディスクの .cue と .bin（か .iso）を選んでください。メモリーカードはそのまま使えます</p>
+          <div class="chips">
+            <label class="btn accent">
+              ディスクを入れかえる
+              <input type="file" id="disc-file" multiple hidden />
+            </label>
+          </div>
+        </section>
         <section id="smooth-section">
           <h2>ドットをなめらかに</h2>
           <div class="chips" id="smooth-modes"></div>
@@ -94,16 +116,6 @@
           </div>
           <p class="hint" id="library-hint"></p>
           <ul id="library"></ul>
-        </section>
-        <section id="disc-section" hidden>
-          <h2>ディスクの入れかえ</h2>
-          <p class="hint">何枚組のゲームで「ディスク 2 を入れてください」と出たら、次のディスクの .cue と .bin（か .iso）を選んでください。メモリーカードはそのまま使えます</p>
-          <div class="chips">
-            <label class="btn accent">
-              ディスクを入れかえる
-              <input type="file" id="disc-file" multiple hidden />
-            </label>
-          </div>
         </section>
         <section id="bios-section">
           <h2>プレイステーションの BIOS</h2>

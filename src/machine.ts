@@ -565,8 +565,22 @@ export class PsxMachine implements Machine {
     this.fps = this.psx.fps;
   }
 
+  /** 読み込みを速く・色をなめらかに */
+  private fastCd = false;
+  private trueColor = false;
+  setFastCd(on: boolean) {
+    this.fastCd = on;
+    this.psx.cdrom.fastRead = on;
+  }
+  setTrueColor(on: boolean) {
+    this.trueColor = on;
+    this.psx.gpu.setTrueColor(on);
+  }
+
   private make(): Psx {
     const p = new Psx(this.bios);
+    p.cdrom.fastRead = this.fastCd;
+    p.gpu.setTrueColor(this.trueColor);
     if (this.disc) {
       p.insertDisc(this.disc);
       p.pal = this.disc.region() === 'pal';
@@ -688,6 +702,8 @@ export class PsxMachine implements Machine {
     const cd = this.psx.cdrom;
     if (cd.lidOpen) cd.nextDisc = this.disc;
     else cd.disc = this.disc;
+    cd.fastRead = this.fastCd;
+    this.psx.gpu.setTrueColor(this.trueColor);
     this.psx.gpu.render();
     this.psx.sio.cardDirty = true;
     this.psx.sio.buttons = this.pad;

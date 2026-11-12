@@ -367,11 +367,20 @@ export class Cdrom {
     this.cmdAt = this.now() + (v === 0x0a ? ACK_INIT : ACK);
   }
 
+  /** 読み込みを速く（XA の音声や CD の音楽を流しているときは本来の速さ） */
+  fastRead = false;
+
+  private get fast(): boolean {
+    return this.fastRead && !(this.mode & 0x40) && !this.playing;
+  }
+
   private get speedCycles(): number {
-    return this.mode & 0x80 ? SECTOR_2X : SECTOR_1X;
+    const c = this.mode & 0x80 ? SECTOR_2X : SECTOR_1X;
+    return this.fast ? Math.round(c / 8) : c;
   }
 
   private seekTime(): number {
+    if (this.fast) return 20000;
     const d = Math.abs(this.setloc - this.pos);
     return 20000 + Math.min(1500000, d * 20);
   }
