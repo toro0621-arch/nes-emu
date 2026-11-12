@@ -18,6 +18,12 @@ import { isWsRom, Ws } from './ws/ws';
 import { Psx } from './psx/psx';
 import type { Disc } from './psx/disc';
 import { PAD } from './psx/sio';
+import type { RomPatch } from './cheats';
+
+function patchMap(p: RomPatch[]): Map<number, { val: number; cmp: number }> | null {
+  if (!p.length) return null;
+  return new Map(p.map((x) => [x.addr, { val: x.val, cmp: x.cmp }]));
+}
 
 export type System = 'nes' | 'gb' | 'ws' | 'gba' | 'snes' | 'psx';
 
@@ -59,6 +65,11 @@ export interface Machine {
   setPalette(id: string): void;
   /** 画面の縦横比（なければ width・height のとおり。プレイステーションはいつも 4:3） */
   readonly aspect?: [number, number];
+  /** 改造コード：RAM に書く・読む（アドレスは本体の CPU から見た番地） */
+  poke?(addr: number, v: number): void;
+  peek?(addr: number): number;
+  /** 改造コード：ROM の値の差し替え（ゲームジーニーなど） */
+  setRomPatches?(p: RomPatch[]): void;
   /** 液晶っぽい色にする（ゲームボーイアドバンスだけ） */
   setLcdColor?(on: boolean): void;
   reset(): void;
@@ -91,6 +102,20 @@ export function createMachine(data: Uint8Array, name = ''): Machine {
 }
 
 class NesMachine implements Machine {
+  poke(a: number, v: number) {
+    a &= 0xffff;
+    if (a < 0x2000) this.nes.bus.ram[a & 0x7ff] = v;
+    else if (a >= 0x6000 && a < 0x8000) this.nes.bus.write(a, v);
+  }
+  peek(a: number) {
+    a &= 0xffff;
+    if (a < 0x2000) return this.nes.bus.ram[a & 0x7ff];
+    if (a >= 0x6000) return this.nes.bus.read(a);
+    return 0;
+  }
+  setRomPatches(p: RomPatch[]) {
+    this.nes.bus.genie = patchMap(p);
+  }
   readonly system = 'nes';
   readonly fps = 60.0988;
   readonly width = SCREEN_W;
@@ -145,6 +170,18 @@ class NesMachine implements Machine {
 }
 
 class GbMachine implements Machine {
+  private patches: RomPatch[] = [];
+  poke(a: number, v: number) {
+    a &= 0xffff;
+    if ((a >= 0xa000 && a < 0xfe00) || (a >= 0xff80 && a < 0xffff)) this.gb.write(a, v);
+  }
+  peek(a: number) {
+    return this.gb.read(a & 0xffff);
+  }
+  setRomPatches(p: RomPatch[]) {
+    this.patches = p;
+    this.gb.genie = patchMap(p);
+  }
   readonly system = 'gb';
   readonly fps = 59.7275;
   readonly width = GB_W;
@@ -206,6 +243,7 @@ class GbMachine implements Machine {
     next.apu.sampleRate = old.apu.sampleRate;
     next.apu.rateAdjust = old.apu.rateAdjust;
     this.gb = next;
+    next.genie = patchMap(this.patches);
   }
   get saveRam() {
     return this.gb.cart.saveRam;
@@ -239,6 +277,16 @@ class GbMachine implements Machine {
  * ワンダースワン。縦持ちのソフトは画面を 90° 回して出し、十字キーを Y ボタンに、A・B を X ボタンに割り当てる
  */
 class WsMachine implements Machine {
+  poke(a: number, v: number) {
+    if (a < 0x10000) this.ws.ram[a] = v;
+    else if (a < 0x20000 && this.ws.sram) this.ws.sram[(a & 0xffff) & (this.ws.sram.length - 1)] = v;
+  }
+  peek(a: number) {
+    if (a < 0x10000) return this.ws.ram[a];
+    if (a < 0x20000 && this.ws.sram) return this.ws.sram[(a & 0xffff) & (this.ws.sram.length - 1)];
+    return 0;
+  }
+  setRomPatches() {}
   readonly system = 'ws';
   readonly fps = 75.47;
   readonly crop = 0;
@@ -350,6 +398,15 @@ class WsMachine implements Machine {
 
 /** ゲームボーイアドバンス（L・R ボタンあり） */
 class GbaMachine implements Machine {
+  poke(a: number, v: number) {
+    const r = a >>> 24;
+    if (r === 2 || r === 3) this.gba.write8(a, v);
+  }
+  peek(a: number) {
+    const r = a >>> 24;
+    return r === 2 || r === 3 ? this.gba.read8(a) : 0;
+  }
+  setRomPatches() {}
   readonly system = 'gba';
   /** 1 フレーム = 228 ライン × 1232 クロック */
   readonly fps = GBA_CLOCK / 280896;
@@ -449,6 +506,17 @@ class GbaMachine implements Machine {
 
 /** スーパーファミコン（A・B・X・Y・L・R） */
 class SnesMachine implements Machine {
+  private patches: RomPatch[] = [];
+  poke(a: number, v: number) {
+    this.snes.poke(a, v);
+  }
+  peek(a: number) {
+    return this.snes.peek(a);
+  }
+  setRomPatches(p: RomPatch[]) {
+    this.patches = p;
+    this.snes.genie = patchMap(p);
+  }
   readonly system = 'snes';
   readonly fps = MASTER_CLOCK / (LINE_CYCLES * LINES);
   readonly width = SNES_W;
@@ -510,6 +578,7 @@ class SnesMachine implements Machine {
     next.apu.sampleRate = old.apu.sampleRate;
     next.apu.rateAdjust = old.apu.rateAdjust;
     next.setPad(this.pad);
+    next.genie = patchMap(this.patches);
     this.snes = next;
   }
   get saveRam() {
@@ -546,6 +615,15 @@ export function isPsxExe(d: Uint8Array): boolean {
 
 /** プレイステーション（△○×□・L1/L2/R1/R2） */
 export class PsxMachine implements Machine {
+  poke(a: number, v: number) {
+    const p = a & 0x1fffffff;
+    if (p < 0x800000) this.psx.ram[p & 0x1fffff] = v;
+  }
+  peek(a: number) {
+    const p = a & 0x1fffffff;
+    return p < 0x800000 ? this.psx.ram[p & 0x1fffff] : 0;
+  }
+  setRomPatches() {}
   readonly system = 'psx';
   readonly fps: number;
   readonly crop = 0;

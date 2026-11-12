@@ -791,3 +791,49 @@ html[data-system='psx'] #ab .round.pressed {
     width: 56px;
   }
 }
+
+/* ---- 改造コード ---- */
+#cheat-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.cheat {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.cheat .info {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cheat small {
+  display: block;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.cheat-form {
+  display: grid;
+  gap: 8px;
+}
+.cheat-form input,
+.cheat-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #45455a;
+  background: #1c1c26;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+}
+.cheat-form textarea {
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+.cheat-form .btn {
+  justify-self: start;
+}

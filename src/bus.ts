@@ -7,6 +7,8 @@ import type { Ppu } from './ppu';
 // CPU から見たメモリマップ
 export class NesBus implements CpuBus {
   ram = new Uint8Array(0x800);
+  /** 改造コードの ROM の差し替え（なければ null） */
+  genie: Map<number, { val: number; cmp: number }> | null = null;
   cpu!: Cpu;
   apu!: Apu;
   pads = [new Controller(), new Controller()];
@@ -29,7 +31,13 @@ export class NesBus implements CpuBus {
     if (addr === 0x4017) return 0x40 | this.pads[1].read();
     if (addr === 0x4015) return this.apu.readStatus();
     if (addr < 0x4020) return 0x40; // 読めないレジスタ（データバスの残り）
-    return this.mapper.cpuRead(addr);
+    const v = this.mapper.cpuRead(addr);
+    if (this.genie !== null && addr >= 0x8000) {
+      // 改造コード（ゲームジーニー）：ROM の値を差し替える
+      const g = this.genie.get(addr);
+      if (g && (g.cmp < 0 || g.cmp === v)) return g.val;
+    }
+    return v;
   }
 
   write(addr: number, v: number): void {

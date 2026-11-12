@@ -113,9 +113,26 @@ export class Snes implements W65Bus {
 
   read(a: number): number {
     this.cycles += this.speed(a);
-    const v = this.readNoTime(a);
+    let v = this.readNoTime(a);
+    if (this.genie !== null) {
+      // 改造コード：ROM の値を差し替える
+      const g = this.genie.get(a);
+      if (g && (g.cmp < 0 || g.cmp === v)) v = g.val;
+    }
     if (v >= 0) this.mdr = v;
     return this.mdr;
+  }
+
+  /** 改造コードの ROM の差し替え */
+  genie: Map<number, { val: number; cmp: number }> | null = null;
+
+  /** 改造コード用：時間を進めずに読み書きする */
+  peek(a: number): number {
+    const v = this.readNoTime(a & 0xffffff);
+    return v < 0 ? 0 : v;
+  }
+  poke(a: number, v: number): void {
+    this.writeNoTime(a & 0xffffff, v);
   }
 
   write(a: number, v: number): void {

@@ -8,6 +8,7 @@ import { createMachine, detectSystem, isPsxExe, type Machine, type System } from
 import { createPsx, discId, numId, openDisc, pickDisc } from './psx/load';
 import type { PsxMachine } from './machine';
 import { stateFromJson, stateToJson, type SaveState } from './savestate';
+import { CHEAT_HELP, CheatRunner, parseCheat, type Cheat, type CheatTarget } from './cheats';
 import { isZip, unzipRom } from './zip';
 import {
   deleteLibrary,
@@ -222,6 +223,7 @@ async function startRom(
   next.setPalette(paletteFor(id));
   next.setLcdColor?.(lcdColor);
   applyPsxSettings(next);
+  applyCheats();
   bindScreen(next);
   message.textContent = '';
   resetButton.disabled = false;
@@ -266,6 +268,7 @@ async function autoLoad(m: Machine, id: string): Promise<boolean> {
 function restartFromBeginning(): void {
   if (!machine) return;
   machine.reset();
+  applyCheats();
   rewind.clear();
   acc = 0;
   showToast('最初から始めました');
@@ -384,6 +387,7 @@ const updateSW = registerSW({
 resetButton.addEventListener('click', () => {
   if (machine) {
     machine.reset();
+    applyCheats();
     bindScreen(machine);
   }
   closeMenu();
@@ -543,6 +547,92 @@ savFile.addEventListener('change', async () => {
   const started = await startRom(rom.name, rom.data, currentFiles ?? undefined, currentFiles ? gameId : undefined, id !== gameId ? id : undefined);
   closeMenu();
   showToast(started?.loadedSave ? 'セーブデータを読み込みました' : 'セーブデータを読み込めませんでした');
+});
+
+// ---- 改造コード（ゲームごとに覚える） ----
+const CHEAT_KEY = 'nes-emu:cheats:';
+const cheats = new CheatRunner();
+function cheatList(): Cheat[] {
+  if (!currentSaveId) return [];
+  try {
+    const v = JSON.parse(localStorage.getItem(CHEAT_KEY + currentSaveId) ?? '[]');
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+function saveCheats(list: Cheat[]): void {
+  if (!currentSaveId) return;
+  try {
+    localStorage.setItem(CHEAT_KEY + currentSaveId, JSON.stringify(list));
+  } catch {
+    showToast('改造コードを保存できませんでした');
+  }
+  applyCheats(list);
+}
+/** オンのコードを本体にかけ直す */
+function applyCheats(list = cheatList()): void {
+  const m = machine;
+  if (!m?.poke) {
+    cheats.set('nes', [], null);
+    return;
+  }
+  cheats.set(m.system, list, m as unknown as CheatTarget);
+}
+function renderCheats(): void {
+  const m = machine;
+  $('cheat-section').hidden = !m?.poke || !currentSaveId;
+  if (!m) return;
+  $('cheat-hint').textContent = `使えるコード：${CHEAT_HELP[m.system]}。おかしくなったらオフにしてリセットしてください`;
+  const el = $('cheat-list');
+  el.replaceChildren();
+  const list = cheatList();
+  list.forEach((c, i) => {
+    const li = document.createElement('li');
+    li.className = 'cheat';
+    const info = document.createElement('div');
+    info.className = 'info';
+    info.textContent = c.name || '（名前なし）';
+    const code = document.createElement('small');
+    code.textContent = c.code.replace(/\n/g, ' ');
+    info.append(code);
+    const toggle = button(
+      c.on ? 'オン' : 'オフ',
+      () => {
+        list[i].on = !list[i].on;
+        saveCheats(list);
+        renderCheats();
+      },
+      'btn' + (c.on ? ' accent' : ''),
+    );
+    const del = confirmButton('削除', '消す？', () => {
+      list.splice(i, 1);
+      saveCheats(list);
+      renderCheats();
+    }, 'btn del');
+    li.append(info, toggle, del);
+    el.append(li);
+  });
+}
+$('cheat-add').addEventListener('click', () => {
+  const m = machine;
+  if (!m?.poke) return;
+  const nameEl = $<HTMLInputElement>('cheat-name');
+  const codeEl = $<HTMLTextAreaElement>('cheat-code');
+  const code = codeEl.value.trim();
+  try {
+    parseCheat(m.system, code);
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : 'コードを読めませんでした');
+    return;
+  }
+  const list = cheatList();
+  list.push({ name: nameEl.value.trim(), code, on: true });
+  saveCheats(list);
+  nameEl.value = '';
+  codeEl.value = '';
+  renderCheats();
+  showToast('改造コードを追加しました（オン）');
 });
 
 // ---- プレイステーションの設定（全部のソフトで共通。最初はどちらもオン） ----
@@ -736,6 +826,7 @@ async function openMenu(): Promise<void> {
   renderFfSpeeds();
   void renderBios();
   renderPsxSettings();
+  renderCheats();
   $('disc-section').hidden = machine?.system !== 'psx' || !currentFiles;
   menuOpen = true; // 開いている間はゲームを止める
   menu.hidden = false;
@@ -1154,6 +1245,7 @@ function loop(now: number): void {
         continue;
       }
       machine.setButtons(touch.read() | keyboard.read());
+      if (cheats.active && machine.poke) cheats.apply(machine as unknown as CheatTarget);
       machine.runFrame();
       rewind.record(machine);
       acc -= FRAME_MS;

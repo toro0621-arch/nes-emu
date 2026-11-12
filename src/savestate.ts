@@ -16,7 +16,7 @@ export interface SaveState {
 }
 
 /** 写さないフィールド（画面・音の出力バッファ。次のフレームで作り直される） */
-const SKIP_KEYS = new Set(['frameBuffer', 'samples', 'sampleLength', 'cart', 'host']);
+const SKIP_KEYS = new Set(['frameBuffer', 'samples', 'sampleLength', 'cart', 'host', 'genie']);
 
 type Obj = Record<string, unknown>;
 

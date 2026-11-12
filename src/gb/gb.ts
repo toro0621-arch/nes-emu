@@ -174,8 +174,18 @@ export class Gb implements GbBus {
   }
 
   // ---- メモリ ----
+  /** 改造コード（ゲームジーニー）の ROM の差し替え */
+  genie: Map<number, { val: number; cmp: number }> | null = null;
+
   read(a: number): number {
-    if (a < 0x8000) return this.cart.read(a);
+    if (a < 0x8000) {
+      const v = this.cart.read(a);
+      if (this.genie !== null) {
+        const g = this.genie.get(a);
+        if (g && (g.cmp < 0 || g.cmp === v)) return g.val;
+      }
+      return v;
+    }
     if (a < 0xa000) return this.ppu.vram[this.ppu.vramBank * 0x2000 + (a - 0x8000)];
     if (a < 0xc000) return this.cart.read(a);
     if (a < 0xd000) return this.wram[a - 0xc000];
