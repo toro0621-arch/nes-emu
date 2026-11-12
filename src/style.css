@@ -601,11 +601,13 @@ html[data-system='ws'] [data-btn='SELECT'] {
   display: none;
 }
 html[data-system='gba'] #lr,
-html[data-system='snes'] #lr {
+html[data-system='snes'] #lr,
+html[data-system='psx'] #lr {
   display: block;
 }
 html[data-system='gba'] #pad,
-html[data-system='snes'] #pad {
+html[data-system='snes'] #pad,
+html[data-system='psx'] #pad {
   min-height: calc(var(--unit) * 5.6);
 }
 .shoulder {
@@ -647,24 +649,29 @@ html.landscape .shoulder[data-btn='R'] {
 .round.sfc {
   display: none;
 }
-html[data-system='snes'] .round.sfc {
+html[data-system='snes'] .round.sfc,
+html[data-system='psx'] .round.sfc {
   display: flex;
 }
-html[data-system='snes'] #ab {
+html[data-system='snes'] #ab,
+html[data-system='psx'] #ab {
   top: calc(50% - var(--unit) * 2.05);
   width: calc(var(--unit) * 3.1);
   height: calc(var(--unit) * 3.1);
 }
-html.landscape[data-system='snes'] #ab {
+html.landscape[data-system='snes'] #ab,
+html.landscape[data-system='psx'] #ab {
   right: calc((var(--side) - var(--unit) * 3.1) / 2);
   top: calc(52% - var(--unit) * 1.55);
 }
-html[data-system='snes'] #ab .round {
+html[data-system='snes'] #ab .round,
+html[data-system='psx'] #ab .round {
   width: calc(var(--unit) * 1.1);
   height: calc(var(--unit) * 1.1);
   font-size: calc(var(--unit) * 0.34);
 }
-html[data-system='snes'] #ab [data-btn='X'] {
+html[data-system='snes'] #ab [data-btn='X'],
+html[data-system='psx'] #ab [data-btn='X'] {
   left: calc(var(--unit) * 1);
   top: 0;
   right: auto;
@@ -672,7 +679,8 @@ html[data-system='snes'] #ab [data-btn='X'] {
   background: #3a63c9;
   box-shadow: 0 3px 0 #233d7d;
 }
-html[data-system='snes'] #ab [data-btn='Y'] {
+html[data-system='snes'] #ab [data-btn='Y'],
+html[data-system='psx'] #ab [data-btn='Y'] {
   left: 0;
   top: calc(var(--unit) * 1);
   right: auto;
@@ -680,13 +688,15 @@ html[data-system='snes'] #ab [data-btn='Y'] {
   background: #2e9a52;
   box-shadow: 0 3px 0 #1c5e32;
 }
-html[data-system='snes'] #ab [data-btn='A'] {
+html[data-system='snes'] #ab [data-btn='A'],
+html[data-system='psx'] #ab [data-btn='A'] {
   left: calc(var(--unit) * 2);
   top: calc(var(--unit) * 1);
   right: auto;
   bottom: auto;
 }
-html[data-system='snes'] #ab [data-btn='B'] {
+html[data-system='snes'] #ab [data-btn='B'],
+html[data-system='psx'] #ab [data-btn='B'] {
   left: calc(var(--unit) * 1);
   top: calc(var(--unit) * 2);
   right: auto;
@@ -716,4 +726,59 @@ header .btn {
   #fps {
     font-size: 11px;
   }
+}
+
+/* ---- プレイステーション：△○×□（上 △ 緑、右 ○ 赤、下 × 青、左 □ ピンク）と L1/L2/R1/R2 ---- */
+.shoulder.ps {
+  display: none;
+}
+html[data-system='psx'] .shoulder {
+  width: calc(var(--unit) * 1.5);
+}
+html[data-system='psx'] .shoulder.ps {
+  display: flex;
+}
+html[data-system='psx'] .shoulder[data-btn='L2'] {
+  left: calc(var(--unit) * 0.3);
+}
+html[data-system='psx'] .shoulder[data-btn='L'] {
+  left: calc(var(--unit) * 2);
+}
+html[data-system='psx'] .shoulder[data-btn='R'] {
+  right: calc(var(--unit) * 2);
+}
+html[data-system='psx'] .shoulder[data-btn='R2'] {
+  right: calc(var(--unit) * 0.3);
+}
+html.landscape[data-system='psx'] .shoulder[data-btn='L2'] {
+  left: calc(var(--side) / 2 - var(--unit) * 1.6);
+}
+html.landscape[data-system='psx'] .shoulder[data-btn='L'] {
+  left: calc(var(--side) / 2 + var(--unit) * 0.1);
+}
+html.landscape[data-system='psx'] .shoulder[data-btn='R'] {
+  right: calc(var(--side) / 2 + var(--unit) * 0.1);
+}
+html.landscape[data-system='psx'] .shoulder[data-btn='R2'] {
+  right: calc(var(--side) / 2 - var(--unit) * 1.6);
+}
+html[data-system='psx'] #ab .round {
+  background: #2a2a34;
+  box-shadow: 0 3px 0 #15151b;
+  font-size: calc(var(--unit) * 0.5);
+}
+html[data-system='psx'] #ab [data-btn='X'] {
+  color: #3fc28a;
+}
+html[data-system='psx'] #ab [data-btn='A'] {
+  color: #f0566a;
+}
+html[data-system='psx'] #ab [data-btn='B'] {
+  color: #6f9cf0;
+}
+html[data-system='psx'] #ab [data-btn='Y'] {
+  color: #e98fd0;
+}
+html[data-system='psx'] #ab .round.pressed {
+  background: #44444f;
 }

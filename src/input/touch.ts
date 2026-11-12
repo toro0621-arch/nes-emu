@@ -52,6 +52,8 @@ export class TouchInput {
     this.shoulder = [
       [q('[data-btn="L"]'), BUTTON.L],
       [q('[data-btn="R"]'), BUTTON.R],
+      [q('[data-btn="L2"]'), BUTTON.L2],
+      [q('[data-btn="R2"]'), BUTTON.R2],
     ];
 
     root.addEventListener('pointerdown', (e) => {
@@ -80,6 +82,7 @@ export class TouchInput {
     // L・R（十字キーや A・B より先に。少し広めに反応させる）
     if (this.shoulder[0][0].offsetParent !== null) {
       for (const [el, m] of this.shoulder) {
+        if (el.offsetParent === null) continue;
         const k = el.getBoundingClientRect();
         const pad = 8;
         if (x >= k.left - pad && x <= k.right + pad && y >= k.top - pad && y <= k.bottom + pad) return m;

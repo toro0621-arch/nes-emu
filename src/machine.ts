@@ -15,12 +15,16 @@ import { SNES_H, SNES_W } from './snes/ppu';
 import { LINE_CYCLES, LINES, MASTER_CLOCK, Snes } from './snes/snes';
 import { WS_H, WS_W } from './ws/display';
 import { isWsRom, Ws } from './ws/ws';
+import { Psx } from './psx/psx';
+import type { Disc } from './psx/disc';
+import { PAD } from './psx/sio';
 
-export type System = 'nes' | 'gb' | 'ws' | 'gba' | 'snes';
+export type System = 'nes' | 'gb' | 'ws' | 'gba' | 'snes' | 'psx';
 
 /** ROM の中身（とファイル名）から本体を決める。わからなければ null */
 export function detectSystem(data: Uint8Array, name = ''): System | null {
   if (data[0] === 0x4e && data[1] === 0x45 && data[2] === 0x53 && data[3] === 0x1a) return 'nes';
+  if (isPsxExe(data)) return 'psx';
   if (isGbaRom(data)) return 'gba';
   if (isGbRom(data)) return 'gb';
   if (/\.(sfc|smc)$/i.test(name)) return 'snes';
@@ -53,6 +57,8 @@ export interface Machine {
   readonly colorable: boolean;
   /** 色づけのパレット（palettes.ts の id） */
   setPalette(id: string): void;
+  /** 画面の縦横比（なければ width・height のとおり。プレイステーションはいつも 4:3） */
+  readonly aspect?: [number, number];
   /** 液晶っぽい色にする（ゲームボーイアドバンスだけ） */
   setLcdColor?(on: boolean): void;
   reset(): void;
@@ -530,5 +536,149 @@ class SnesMachine implements Machine {
   loadState(st: SaveState) {
     applyState(st, 'snes', this.data.length, this.parts());
     this.snes.sramDirty = this.snes.sram.length > 0;
+  }
+}
+
+/** プレイステーションの実行ファイル（PS-X EXE） */
+export function isPsxExe(d: Uint8Array): boolean {
+  return d.length > 0x800 && String.fromCharCode(...d.subarray(0, 8)) === 'PS-X EXE';
+}
+
+/** プレイステーション（△○×□・L1/L2/R1/R2） */
+export class PsxMachine implements Machine {
+  readonly system = 'psx';
+  readonly fps: number;
+  readonly crop = 0;
+  readonly colorable = false;
+  readonly aspect: [number, number] = [320, 240];
+  psx: Psx;
+  private pad = 0;
+  private spread = 1;
+
+  constructor(
+    private readonly bios: Uint8Array,
+    private readonly disc: Disc | null,
+    private readonly exe: Uint8Array | null,
+    private readonly id: number,
+  ) {
+    this.psx = this.make();
+    this.fps = this.psx.fps;
+  }
+
+  private make(): Psx {
+    const p = new Psx(this.bios);
+    if (this.disc) {
+      p.insertDisc(this.disc);
+      p.pal = this.disc.region() === 'pal';
+    }
+    if (this.exe) p.loadExe(this.exe);
+    return p;
+  }
+
+  setPalette() {}
+  get width() {
+    return this.psx.gpu.outW;
+  }
+  get height() {
+    return this.psx.gpu.outH;
+  }
+  get frameBuffer() {
+    return this.psx.gpu.frameBuffer;
+  }
+  runFrame() {
+    this.psx.runFrame();
+  }
+  setButtons(b: number) {
+    let p = 0;
+    if (b & BUTTON.SELECT) p |= PAD.SELECT;
+    if (b & BUTTON.START) p |= PAD.START;
+    if (b & BUTTON.UP) p |= PAD.UP;
+    if (b & BUTTON.DOWN) p |= PAD.DOWN;
+    if (b & BUTTON.LEFT) p |= PAD.LEFT;
+    if (b & BUTTON.RIGHT) p |= PAD.RIGHT;
+    if (b & BUTTON.A) p |= PAD.CIRCLE;
+    if (b & BUTTON.B) p |= PAD.CROSS;
+    if (b & BUTTON.X) p |= PAD.TRIANGLE;
+    if (b & BUTTON.Y) p |= PAD.SQUARE;
+    if (b & BUTTON.L) p |= PAD.L1;
+    if (b & BUTTON.R) p |= PAD.R1;
+    if (b & BUTTON.L2) p |= PAD.L2;
+    if (b & BUTTON.R2) p |= PAD.R2;
+    this.pad = p;
+    this.psx.sio.buttons = p;
+  }
+  takeSamples() {
+    return this.psx.spu.takeSamples();
+  }
+  setAudio(rate: number, adjust: number) {
+    this.psx.spu.sampleRate = rate;
+    this.psx.spu.rateAdjust = adjust;
+  }
+  setStereo(spread: number) {
+    this.spread = spread;
+    this.psx.spu.spread = spread;
+  }
+  reset() {
+    const old = this.psx;
+    const next = this.make();
+    next.sio.card.set(old.sio.card);
+    next.spu.spread = this.spread;
+    next.spu.sampleRate = old.spu.sampleRate;
+    next.spu.rateAdjust = old.spu.rateAdjust;
+    next.sio.buttons = this.pad;
+    this.psx = next;
+  }
+  get saveRam() {
+    return this.psx.sio.card;
+  }
+  get saveDirty() {
+    return this.psx.sio.cardDirty;
+  }
+  set saveDirty(v: boolean) {
+    this.psx.sio.cardDirty = v;
+  }
+  afterSaveLoaded() {}
+  private parts(): Record<string, object> {
+    const p = this.psx;
+    return {
+      psx: p,
+      cpu: p.cpu,
+      gte: p.gte,
+      gpu: p.gpu,
+      timers: p.timers,
+      cdrom: p.cdrom,
+      cdaudio: p.cdrom.audio,
+      spu: p.spu,
+      mdec: p.mdec,
+      sio: p.sio,
+    };
+  }
+  saveState() {
+    const p = this.psx;
+    const skip = new Set<unknown>([
+      p,
+      p.cpu,
+      p.gte,
+      p.gpu,
+      p.timers,
+      p.cdrom,
+      p.cdrom.audio,
+      p.spu,
+      p.mdec,
+      p.sio,
+      p.cdrom.disc,
+      ...p.stateSkip(),
+      ...p.gpu.stateSkip(),
+      ...p.cdrom.stateSkip(),
+      ...p.spu.stateSkip(),
+      ...p.mdec.stateSkip(),
+    ]);
+    return captureState('psx', this.id, this.parts(), skip);
+  }
+  loadState(st: SaveState) {
+    applyState(st, 'psx', this.id, this.parts());
+    this.psx.gpu.render();
+    this.psx.sio.cardDirty = true;
+    this.psx.sio.buttons = this.pad;
   }
 }

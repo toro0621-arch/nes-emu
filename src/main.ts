@@ -4,13 +4,18 @@ import { KeyboardInput } from './input/keyboard';
 import { TouchInput } from './input/touch';
 import { AUTO_ID, GB_PALETTES, MONO_ID, autoPalette } from './gb/palettes';
 import { DMG_COLORS } from './gb/ppu';
-import { createMachine, detectSystem, type Machine, type System } from './machine';
+import { createMachine, detectSystem, isPsxExe, type Machine, type System } from './machine';
+import { createPsx, discId, pickDisc } from './psx/load';
 import type { SaveState } from './savestate';
 import { isZip, unzipRom } from './zip';
 import {
   deleteLibrary,
   getState,
   listLibrary,
+  loadBios,
+  putLibraryChecked,
+  saveBios,
+  type DiscFile,
   loadLastRom,
   loadSram,
   putLibrary,
@@ -85,16 +90,29 @@ function bindScreen(m: Machine): void {
     canvas.height = h;
   }
   const root = document.documentElement.style;
-  root.setProperty('--sw', String(w));
-  root.setProperty('--sh', String(h));
+  root.setProperty('--sw', String(m.aspect ? m.aspect[0] : w));
+  root.setProperty('--sh', String(m.aspect ? m.aspect[1] : h));
+  if (document.documentElement.dataset.system !== m.system) setButtonLabels(m.system);
   document.documentElement.dataset.system = m.system;
   // ワンダースワンの縦持ちのソフトでは、ひし形のボタンを X ボタンとして表示する
   if (m.vertical) document.documentElement.dataset.wsvertical = '';
   else delete document.documentElement.dataset.wsvertical;
 }
 
+/** ボタンの文字（プレイステーションは △○×□・L1/R1） */
+function setButtonLabels(system: System): void {
+  const ps = system === 'psx';
+  const labels: Record<string, string> = ps
+    ? { A: '○', B: '✕', X: '△', Y: '□', L: 'L1', R: 'R1' }
+    : { A: 'A', B: 'B', X: 'X', Y: 'Y', L: 'L', R: 'R' };
+  for (const [btn, text] of Object.entries(labels)) {
+    const el = document.querySelector<HTMLElement>(`#pad [data-btn="${btn}"]`);
+    if (el) el.textContent = text;
+  }
+}
+
 /** ファイル名から拡張子を取る */
-const baseName = (name: string) => name.replace(/\.(nes|gbc?|gba|wsc?|sfc|smc)$/i, '');
+const baseName = (name: string) => name.replace(/\.(nes|gbc?|gba|wsc?|sfc|smc|exe)$/i, '');
 
 // ---- 音 ----
 const audio = new AudioOutput();
@@ -127,18 +145,32 @@ for (const type of ['pointerup', 'touchend', 'keydown', 'click']) {
 /** 遊んでいる ROM の ID（セーブデータの保存先） */
 let currentId: string | null = null;
 let currentRom: { name: string; data: Uint8Array } | null = null;
+/** プレイステーションの CD のファイル */
+let currentFiles: DiscFile[] | null = null;
 
 /**
  * ROM を読み込んで動かし始める。セーブデータがあれば、ゲームが読む前に入れておく。
  * 読み込めなければ null、読み込めたらセーブデータを入れたかどうかを返す
  */
-async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: boolean; resumed?: boolean } | null> {
-  if (currentRom && currentRom.data === data) return { loadedSave: false };
+async function startRom(
+  name: string,
+  data: Uint8Array,
+  files?: DiscFile[],
+  knownId?: string,
+): Promise<{ loadedSave: boolean; resumed?: boolean } | null> {
+  if (currentRom && currentRom.data === data && !files) return { loadedSave: false };
+  if (files && knownId && knownId === currentId) return { loadedSave: false };
   await flushSave(); // 前の ROM のセーブを書き出しておく
   await autoSave(); // 前の ROM の続き
   let next: Machine;
+  let discKey: string | null = null;
   try {
-    next = createMachine(data, name);
+    if (files || isPsxExe(data)) {
+      // プレイステーション：BIOS と CD を読む（少し時間がかかる）
+      message.textContent = '読み込み中…';
+      discKey = files ? (knownId ?? (await discId(files))) : null;
+      next = await createPsx(discKey ?? (await romId(data)), files ?? null, files ? null : data);
+    } else next = createMachine(data, name);
   } catch (e) {
     machine = null;
     currentId = null;
@@ -149,7 +181,7 @@ async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: b
     keepScreenOn(false);
     return null;
   }
-  const id = await romId(data);
+  const id = discKey ?? (await romId(data));
   let loadedSave = false;
   const ram = next.saveRam;
   if (ram) {
@@ -164,9 +196,18 @@ async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: b
   machine = next;
   currentId = id;
   currentRom = { name, data };
+  currentFiles = files ?? null;
   // ゲーム一覧に入れる（最後に遊んだ時刻を更新）と、次に開いたときに読み込む ROM として覚える
-  void putLibrary({ id, name, data, lastPlayed: Date.now() });
-  void saveLastRom({ name, data });
+  if (files) {
+    void putLibraryChecked({ id, name, data, files, lastPlayed: Date.now() }).then((ok) => {
+      if (!ok) showToast('端末の空きが足りず、ゲーム一覧に入れられませんでした（今は遊べます）');
+    });
+    void saveLastRom({ name, data, ref: id });
+    void navigator.storage?.persist?.();
+  } else {
+    void putLibrary({ id, name, data, lastPlayed: Date.now() });
+    void saveLastRom({ name, data });
+  }
   next.setStereo(stereo ? 1 : 0);
   next.setPalette(paletteFor(id));
   next.setLcdColor?.(lcdColor);
@@ -243,9 +284,24 @@ window.addEventListener('pagehide', () => {
 });
 
 romInput.addEventListener('change', async () => {
-  const file = romInput.files?.[0];
+  const all = Array.from(romInput.files ?? []);
   romInput.value = '';
+  const file = all[0];
   if (!file) return;
+  // プレイステーションの CD（大きいので中身は読み込まない）
+  const disc = await pickDisc(all);
+  if (disc && 'error' in disc) {
+    closeMenu();
+    showToast(disc.error);
+    return;
+  }
+  if (disc) {
+    closeMenu();
+    const started = await startRom(disc.name, new Uint8Array(0), disc.files);
+    if (started?.resumed) showToast('前のつづきから再開しました', { label: '最初から', run: restartFromBeginning });
+    else if (started?.loadedSave) showToast('メモリーカードを読み込みました');
+    return;
+  }
   let name = file.name;
   let data: Uint8Array = new Uint8Array(await file.arrayBuffer());
   if (isZip(data)) {
@@ -269,7 +325,7 @@ romInput.addEventListener('change', async () => {
 void loadLastRom().then(async (rom) => {
   if (!rom || machine) return;
   // （ゲーム一覧ができる前に遊んでいた ROM も、ここで一覧に入る）
-  const started = await startRom(rom.name, rom.data);
+  const started = await startRom(rom.name, rom.data, rom.files, rom.ref);
   if (started?.resumed)
     showToast(`「${baseName(rom.name)}」のつづきから再開しました`, { label: '最初から', run: restartFromBeginning });
   else if (started) showToast(`前回の「${rom.name}」を読み込みました${started.loadedSave ? '（セーブデータあり）' : ''}`);
@@ -458,9 +514,39 @@ savFile.addEventListener('change', async () => {
   // 作り直して、保存したセーブデータから始める（いまのセーブで上書きしないように）
   m.saveDirty = false;
   currentRom = null;
-  const started = await startRom(rom.name, rom.data);
+  currentId = null;
+  const started = await startRom(rom.name, rom.data, currentFiles ?? undefined);
   closeMenu();
   showToast(started?.loadedSave ? 'セーブデータを読み込みました' : 'セーブデータを読み込めませんでした');
+});
+
+// ---- プレイステーションの BIOS ----
+const biosHint = $('bios-hint');
+const biosClear = $<HTMLButtonElement>('bios-clear');
+const biosFile = $<HTMLInputElement>('bios-file');
+async function renderBios(): Promise<void> {
+  const own = await loadBios();
+  biosClear.hidden = !own;
+  biosHint.textContent = own
+    ? `自分の BIOS（${own.name}）を使っています`
+    : '今は互換 BIOS（OpenBIOS）で動かしています。動かないゲームがあれば、本体から吸い出した BIOS（SCPH1001.BIN など）を選んでください';
+}
+biosFile.addEventListener('change', async () => {
+  const file = biosFile.files?.[0];
+  biosFile.value = '';
+  if (!file) return;
+  if (file.size !== 512 * 1024) {
+    showToast('BIOS は 512KB のファイルです（SCPH1001.BIN など）');
+    return;
+  }
+  const ok = await saveBios({ name: file.name, data: new Uint8Array(await file.arrayBuffer()) });
+  showToast(ok ? 'BIOS を入れました。次にプレイステーションのゲームを開いたときから使います' : 'BIOS を保存できませんでした');
+  await renderBios();
+});
+biosClear.addEventListener('click', async () => {
+  await saveBios(null);
+  showToast('互換 BIOS に戻しました');
+  await renderBios();
 });
 
 // ---- ゲームボーイの色づけ（ソフトごとに覚える。最初は「おまかせ」） ----
@@ -535,6 +621,7 @@ async function openMenu(): Promise<void> {
   renderSram();
   renderSmooth();
   renderFfSpeeds();
+  void renderBios();
   menuOpen = true; // 開いている間はゲームを止める
   menu.hidden = false;
   await Promise.all([renderSlots(), renderLibrary()]);
@@ -656,11 +743,13 @@ const FOLDERS: { system: System; name: string; icon: string }[] = [
   { system: 'ws', name: 'ワンダースワン', icon: '📟' },
   { system: 'gba', name: 'ゲームボーイアドバンス', icon: '🟣' },
   { system: 'snes', name: 'スーパーファミコン', icon: '🌈' },
+  { system: 'psx', name: 'プレイステーション', icon: '💿' },
 ];
 /** 開いているフォルダ（null ならフォルダの一覧） */
 let openFolder: System | null = null;
 
-function systemOf(entry: { data: Uint8Array; name: string }): System | null {
+function systemOf(entry: { data: Uint8Array; name: string; files?: DiscFile[] }): System | null {
+  if (entry.files) return 'psx';
   return detectSystem(entry.data, entry.name);
 }
 
@@ -724,9 +813,10 @@ function libraryRow(entry: LibraryEntry): HTMLLIElement {
   play.append(name, when);
   play.addEventListener('click', async () => {
     if (playing) return closeMenu();
-    const started = await startRom(entry.name, entry.data);
     closeMenu();
-    if (started?.loadedSave) showToast('セーブデータを読み込みました');
+    const started = await startRom(entry.name, entry.data, entry.files, entry.id);
+    if (started?.resumed) showToast('前のつづきから再開しました', { label: '最初から', run: restartFromBeginning });
+    else if (started?.loadedSave) showToast('セーブデータを読み込みました');
   });
   const del = confirmButton('削除', '消す？', async () => {
     await deleteLibrary(entry.id);
@@ -916,6 +1006,8 @@ function loop(now: number): void {
       frames++;
       ran = true;
     }
+    // プレイステーションは画面の大きさが変わる
+    if (ran && image.data.buffer !== machine.frameBuffer.buffer) bindScreen(machine);
     if (ran) smooth.draw(machine.frameBuffer, machine.width, machine.height, machine.crop);
     if (ran && rewound) ctx.putImageData(image, -machine.crop, -machine.crop);
     else if (ran) {

@@ -13,6 +13,15 @@ const LAST = 'last';
 export interface SavedRom {
   name: string;
   data: Uint8Array;
+  /** プレイステーションの CD は大きいので、ゲーム一覧の ID だけ覚えておく */
+  ref?: string;
+  files?: DiscFile[];
+}
+
+/** CD のイメージのファイル（.bin・.cue・.iso）。大きいので中身は読み込まずに持つ */
+export interface DiscFile {
+  name: string;
+  blob: Blob;
 }
 
 // 接続は開いたままにしておく。アプリを閉じる瞬間の保存で、開くのを待たずにすぐ書き始められるように
@@ -65,6 +74,10 @@ export async function saveLastRom(rom: SavedRom): Promise<void> {
 export async function loadLastRom(): Promise<SavedRom | null> {
   try {
     const rom = await run<SavedRom | undefined>('readonly', (s) => s.get(LAST));
+    if (rom?.ref) {
+      const e = await getLibrary(rom.ref);
+      return e ? { name: e.name, data: e.data, ref: e.id, files: e.files } : null;
+    }
     return rom && rom.data instanceof Uint8Array ? rom : null;
   } catch {
     return null;
@@ -144,6 +157,47 @@ export interface LibraryEntry {
   data: Uint8Array;
   /** 最後に遊んだ時刻（ミリ秒） */
   lastPlayed: number;
+  /** プレイステーションの CD（あれば data は空） */
+  files?: DiscFile[];
+}
+
+export async function getLibrary(id: string): Promise<LibraryEntry | null> {
+  try {
+    const e = await run<LibraryEntry | undefined>('readonly', (s) => s.get(id), LIBRARY);
+    return e && e.data instanceof Uint8Array ? e : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 保存できたか（大きい CD は端末の空きが足りないと保存できない） */
+export async function putLibraryChecked(entry: LibraryEntry): Promise<boolean> {
+  try {
+    await run('readwrite', (s) => s.put(entry, entry.id), LIBRARY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---- プレイステーションの BIOS（自分で用意したもの） ----
+const BIOS_KEY = 'psx-bios';
+export async function saveBios(bios: SavedRom | null): Promise<boolean> {
+  try {
+    if (bios) await run('readwrite', (s) => s.put(bios, BIOS_KEY));
+    else await run('readwrite', (s) => s.delete(BIOS_KEY));
+    return true;
+  } catch {
+    return false;
+  }
+}
+export async function loadBios(): Promise<SavedRom | null> {
+  try {
+    const b = await run<SavedRom | undefined>('readonly', (s) => s.get(BIOS_KEY));
+    return b && b.data instanceof Uint8Array ? b : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function putLibrary(entry: LibraryEntry): Promise<void> {

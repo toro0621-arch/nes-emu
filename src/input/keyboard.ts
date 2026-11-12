@@ -19,6 +19,8 @@ const KEYMAP: Record<string, number> = {
   // ゲームボーイアドバンスの L・R
   KeyA: BUTTON.L,
   KeyS: BUTTON.R,
+  KeyQ: BUTTON.L2,
+  KeyW: BUTTON.R2,
   // スーパーファミコンの X・Y
   KeyD: BUTTON.X,
   KeyC: BUTTON.Y,

@@ -30,7 +30,7 @@ export default defineConfig({
       },
       workbox: {
         // 画面・スクリプト・音の再生器・アイコンをすべて先に保存し、オフラインでも開けるようにする（manifest はプラグインが足す）
-        globPatterns: ['**/*.{html,js,css,png}'],
+        globPatterns: ['**/*.{html,js,css,png,bin}'],
         cleanupOutdatedCaches: true,
       },
     }),

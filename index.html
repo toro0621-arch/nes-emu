@@ -83,11 +83,22 @@
             <h2>ゲーム一覧</h2>
             <label class="btn accent">
               ＋ ROM を追加
-              <input type="file" id="rom" hidden />
+              <input type="file" id="rom" multiple hidden />
             </label>
           </div>
           <p class="hint" id="library-hint"></p>
           <ul id="library"></ul>
+        </section>
+        <section id="bios-section">
+          <h2>プレイステーションの BIOS</h2>
+          <p class="hint" id="bios-hint"></p>
+          <div class="chips">
+            <label class="btn">
+              BIOS を選ぶ
+              <input type="file" id="bios-file" hidden />
+            </label>
+            <button class="btn" id="bios-clear" hidden>互換 BIOS に戻す</button>
+          </div>
         </section>
         <section>
           <button class="btn" id="reset" disabled>リセット</button>
@@ -100,8 +111,10 @@
     </div>
     <section id="pad">
       <div id="lr">
+        <div class="shoulder ps" data-btn="L2">L2</div>
         <div class="shoulder" data-btn="L">L</div>
         <div class="shoulder" data-btn="R">R</div>
+        <div class="shoulder ps" data-btn="R2">R2</div>
       </div>
       <div id="dpad">
         <div class="arm" data-btn="UP"></div>

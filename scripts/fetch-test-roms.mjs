@@ -89,3 +89,20 @@ mkdirSync(join(dir, 'snes'), { recursive: true });
 for (const f of SNES_FILES) {
   await download(`https://raw.githubusercontent.com/PeterLemon/SNES/master/${f}`, join(dir, 'snes', f.split('/').pop()));
 }
+
+// プレイステーション（PeterLemon さんのテスト。CPU の命令・GTE・GPU）
+const PSX_FILES = [
+  ...['ADD', 'ADDI', 'ADDIU', 'ADDU', 'AND', 'ANDI', 'DIV', 'DIVU', 'MULT', 'MULTU', 'NOR', 'OR', 'ORI', 'SUB', 'SUBU', 'XOR', 'XORI'].map(
+    (n) => `CPUTest/CPU/${n}/CPU${n}.exe`,
+  ),
+  ...['LB', 'LH', 'LW', 'SB', 'SH', 'SW'].map((n) => `CPUTest/CPU/LOADSTORE/${n}/CPU${n}.exe`),
+  ...['SLL', 'SLLV', 'SRA', 'SRAV', 'SRL', 'SRLV'].map((n) => `CPUTest/CPU/SHIFT/${n}/CPU${n}.exe`),
+  'CPUTest/GTE/AVSZ/GTEAVSZ.exe',
+  'CPUTest/GTE/NCLIP/GTENCLIP.exe',
+  'HelloWorld/16BPP/HelloWorld16BPP.exe',
+  'Demo/PSXNICCC/PSXNICCC.exe',
+];
+mkdirSync(join(dir, 'psx'), { recursive: true });
+for (const f of PSX_FILES) {
+  await download(`https://raw.githubusercontent.com/PeterLemon/PSX/master/${f}`, join(dir, 'psx', f.split('/').pop()));
+}

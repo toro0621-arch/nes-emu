@@ -19,6 +19,9 @@ export const BUTTON = {
   // スーパーファミコンの X・Y ボタン
   X: 0x4000,
   Y: 0x8000,
+  // プレイステーションの L2・R2
+  L2: 0x10000,
+  R2: 0x20000,
 } as const;
 
 export class Controller {
