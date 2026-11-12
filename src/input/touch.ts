@@ -20,6 +20,8 @@ export class TouchInput {
   private keys: [HTMLElement, number][];
   /** ワンダースワン用の 4 つのボタン（見えているときだけ） */
   private extra: [HTMLElement, number][];
+  /** スーパーファミコンの A・B・X・Y（X が見えているときだけ、4 つのうち一番近いもの） */
+  private face: [HTMLElement, number][];
   /** ゲームボーイアドバンスの L・R（見えているときだけ） */
   private shoulder: [HTMLElement, number][];
 
@@ -40,6 +42,12 @@ export class TouchInput {
       [q('[data-btn="EX_RIGHT"]'), BUTTON.EX_RIGHT],
       [q('[data-btn="EX_DOWN"]'), BUTTON.EX_DOWN],
       [q('[data-btn="EX_LEFT"]'), BUTTON.EX_LEFT],
+    ];
+    this.face = [
+      [this.a, BUTTON.A],
+      [this.b, BUTTON.B],
+      [q('[data-btn="X"]'), BUTTON.X],
+      [q('[data-btn="Y"]'), BUTTON.Y],
     ];
     this.shoulder = [
       [q('[data-btn="L"]'), BUTTON.L],
@@ -93,6 +101,21 @@ export class TouchInput {
       if (Math.abs(dx) > Math.abs(dy) * T) m |= dx > 0 ? BUTTON.RIGHT : BUTTON.LEFT;
       if (Math.abs(dy) > Math.abs(dx) * T) m |= dy > 0 ? BUTTON.DOWN : BUTTON.UP;
       return m;
+    }
+
+    // スーパーファミコン：ひし形の 4 つのうち一番近いもの
+    if (this.face[2][0].offsetParent !== null) {
+      let best = 0;
+      let bestD = Infinity;
+      for (const [el, m] of this.face) {
+        const d = distTo(el, x, y);
+        if (d < bestD) {
+          bestD = d;
+          best = m;
+        }
+      }
+      const fr = this.a.getBoundingClientRect().width / 2;
+      if (bestD < fr * 1.6) return best;
     }
 
     // A / B：近いほう。2 つの距離が近い（真ん中あたり）なら両方

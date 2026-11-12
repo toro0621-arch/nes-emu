@@ -10,17 +10,23 @@ import { applyState, captureState, loadState, saveState, type SaveState } from '
 import { GBA_CLOCK } from './gba/apu';
 import { Gba, isGbaRom } from './gba/gba';
 import { GBA_H, GBA_W } from './gba/ppu';
+import { isSnesRom } from './snes/cart';
+import { SNES_H, SNES_W } from './snes/ppu';
+import { LINE_CYCLES, LINES, MASTER_CLOCK, Snes } from './snes/snes';
 import { WS_H, WS_W } from './ws/display';
 import { isWsRom, Ws } from './ws/ws';
 
-export type System = 'nes' | 'gb' | 'ws' | 'gba';
+export type System = 'nes' | 'gb' | 'ws' | 'gba' | 'snes';
 
 /** ROM の中身（とファイル名）から本体を決める。わからなければ null */
 export function detectSystem(data: Uint8Array, name = ''): System | null {
   if (data[0] === 0x4e && data[1] === 0x45 && data[2] === 0x53 && data[3] === 0x1a) return 'nes';
   if (isGbaRom(data)) return 'gba';
   if (isGbRom(data)) return 'gb';
-  if (/\.wsc?$/i.test(name) || isWsRom(data)) return 'ws';
+  if (/\.(sfc|smc)$/i.test(name)) return 'snes';
+  if (/\.wsc?$/i.test(name)) return 'ws';
+  if (isSnesRom(data)) return 'snes';
+  if (isWsRom(data)) return 'ws';
   return null;
 }
 
@@ -70,9 +76,11 @@ export function createMachine(data: Uint8Array, name = ''): Machine {
       return new WsMachine(data);
     case 'gba':
       return new GbaMachine(data);
+    case 'snes':
+      return new SnesMachine(data);
   }
   throw new Error(
-    'ファミコン（.nes）・ゲームボーイ（.gb / .gbc）・ワンダースワン（.ws / .wsc）・ゲームボーイアドバンス（.gba）の ROM を選んでください',
+    'ファミコン（.nes）・ゲームボーイ（.gb / .gbc）・ワンダースワン（.ws / .wsc）・ゲームボーイアドバンス（.gba）・スーパーファミコン（.sfc / .smc）の ROM を選んでください',
   );
 }
 
@@ -430,5 +438,95 @@ class GbaMachine implements Machine {
     applyState(s, 'gba', this.data.length, this.parts());
     this.gba.save.dirty = true;
     this.gba.ppu.lcd = this.lcd;
+  }
+}
+
+/** スーパーファミコン（A・B・X・Y・L・R） */
+class SnesMachine implements Machine {
+  readonly system = 'snes';
+  readonly fps = MASTER_CLOCK / (LINE_CYCLES * LINES);
+  readonly width = SNES_W;
+  readonly height = SNES_H;
+  readonly crop = 0;
+  readonly colorable = false;
+  snes: Snes;
+  private pad = 0;
+  private spread = 1;
+
+  constructor(private readonly data: Uint8Array) {
+    this.snes = new Snes(data);
+    this.snes.apu.stereo = true;
+  }
+  setPalette() {}
+  get frameBuffer() {
+    return this.snes.ppu.frameBuffer;
+  }
+  runFrame() {
+    this.snes.runFrame();
+  }
+  setButtons(b: number) {
+    if ((b & (BUTTON.UP | BUTTON.DOWN)) === (BUTTON.UP | BUTTON.DOWN)) b &= ~(BUTTON.UP | BUTTON.DOWN);
+    if ((b & (BUTTON.LEFT | BUTTON.RIGHT)) === (BUTTON.LEFT | BUTTON.RIGHT)) b &= ~(BUTTON.LEFT | BUTTON.RIGHT);
+    // コントローラーの並び（上位ビットから）：B Y SELECT START ↑ ↓ ← → A X L R
+    let p = 0;
+    if (b & BUTTON.B) p |= 0x8000;
+    if (b & BUTTON.Y) p |= 0x4000;
+    if (b & BUTTON.SELECT) p |= 0x2000;
+    if (b & BUTTON.START) p |= 0x1000;
+    if (b & BUTTON.UP) p |= 0x0800;
+    if (b & BUTTON.DOWN) p |= 0x0400;
+    if (b & BUTTON.LEFT) p |= 0x0200;
+    if (b & BUTTON.RIGHT) p |= 0x0100;
+    if (b & BUTTON.A) p |= 0x0080;
+    if (b & BUTTON.X) p |= 0x0040;
+    if (b & BUTTON.L) p |= 0x0020;
+    if (b & BUTTON.R) p |= 0x0010;
+    this.pad = p;
+    this.snes.setPad(p);
+  }
+  takeSamples() {
+    return this.snes.apu.takeSamples();
+  }
+  setAudio(rate: number, adjust: number) {
+    this.snes.apu.sampleRate = rate;
+    this.snes.apu.rateAdjust = adjust;
+  }
+  setStereo(spread: number) {
+    this.spread = spread;
+    this.snes.apu.spread = spread;
+  }
+  reset() {
+    const old = this.snes;
+    const next = new Snes(this.data);
+    next.sram.set(old.sram);
+    next.apu.stereo = true;
+    next.apu.spread = this.spread;
+    next.apu.sampleRate = old.apu.sampleRate;
+    next.apu.rateAdjust = old.apu.rateAdjust;
+    next.setPad(this.pad);
+    this.snes = next;
+  }
+  get saveRam() {
+    return this.snes.sram.length ? this.snes.sram : null;
+  }
+  get saveDirty() {
+    return this.snes.sramDirty;
+  }
+  set saveDirty(v: boolean) {
+    this.snes.sramDirty = v;
+  }
+  afterSaveLoaded() {}
+  private parts(): Record<string, object> {
+    const s = this.snes;
+    return { snes: s, cpu: s.cpu, ppu: s.ppu, apu: s.apu, spc: s.apu.spc, dsp: s.apu.dsp };
+  }
+  saveState() {
+    const s = this.snes;
+    const skip = new Set<unknown>([s, s.cpu, s.ppu, s.apu, s.apu.spc, s.apu.dsp, s.info, ...s.stateSkip()]);
+    return captureState('snes', this.data.length, this.parts(), skip);
+  }
+  loadState(st: SaveState) {
+    applyState(st, 'snes', this.data.length, this.parts());
+    this.snes.sramDirty = this.snes.sram.length > 0;
   }
 }

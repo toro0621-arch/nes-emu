@@ -583,10 +583,12 @@ html[data-system='ws'] [data-btn='SELECT'] {
 #lr {
   display: none;
 }
-html[data-system='gba'] #lr {
+html[data-system='gba'] #lr,
+html[data-system='snes'] #lr {
   display: block;
 }
-html[data-system='gba'] #pad {
+html[data-system='gba'] #pad,
+html[data-system='snes'] #pad {
   min-height: calc(var(--unit) * 5.6);
 }
 .shoulder {
@@ -622,4 +624,56 @@ html.landscape .shoulder[data-btn='L'] {
 }
 html.landscape .shoulder[data-btn='R'] {
   right: calc((var(--side) - var(--unit) * 2.2) / 2);
+}
+
+/* ---- スーパーファミコン：A・B・X・Y をひし形に（上 X、右 A、下 B、左 Y。色も本体と同じ） ---- */
+.round.sfc {
+  display: none;
+}
+html[data-system='snes'] .round.sfc {
+  display: flex;
+}
+html[data-system='snes'] #ab {
+  top: calc(50% - var(--unit) * 2.05);
+  width: calc(var(--unit) * 3.1);
+  height: calc(var(--unit) * 3.1);
+}
+html.landscape[data-system='snes'] #ab {
+  right: calc((var(--side) - var(--unit) * 3.1) / 2);
+  top: calc(52% - var(--unit) * 1.55);
+}
+html[data-system='snes'] #ab .round {
+  width: calc(var(--unit) * 1.1);
+  height: calc(var(--unit) * 1.1);
+  font-size: calc(var(--unit) * 0.34);
+}
+html[data-system='snes'] #ab [data-btn='X'] {
+  left: calc(var(--unit) * 1);
+  top: 0;
+  right: auto;
+  bottom: auto;
+  background: #3a63c9;
+  box-shadow: 0 3px 0 #233d7d;
+}
+html[data-system='snes'] #ab [data-btn='Y'] {
+  left: 0;
+  top: calc(var(--unit) * 1);
+  right: auto;
+  bottom: auto;
+  background: #2e9a52;
+  box-shadow: 0 3px 0 #1c5e32;
+}
+html[data-system='snes'] #ab [data-btn='A'] {
+  left: calc(var(--unit) * 2);
+  top: calc(var(--unit) * 1);
+  right: auto;
+  bottom: auto;
+}
+html[data-system='snes'] #ab [data-btn='B'] {
+  left: calc(var(--unit) * 1);
+  top: calc(var(--unit) * 2);
+  right: auto;
+  bottom: auto;
+  background: #d9a514;
+  box-shadow: 0 3px 0 #8a6a0c;
 }

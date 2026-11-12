@@ -73,3 +73,19 @@ const GBA_FILES = [
 ];
 mkdirSync(join(dir, 'gba'), { recursive: true });
 for (const [url, name] of GBA_FILES) await download(url, join(dir, 'gba', name));
+
+// スーパーファミコン（PeterLemon/SNES のテスト ROM。テストに使うだけで同梱しない）
+const SNES_FILES = [
+  'CPUTest/CPU/ADC/CPUADC.sfc',
+  'CPUTest/CPU/SBC/CPUSBC.sfc',
+  'CPUTest/CPU/MOV/CPUMOV.sfc',
+  'CPUTest/CPU/PSR/CPUPSR.sfc',
+  'CPUTest/SPC700/ADC/SPC700ADC.sfc',
+  'CPUTest/SPC700/SBC/SPC700SBC.sfc',
+  'SPC700/PlayBRRSample/PlayBRRSample.sfc',
+  'PPU/Mode7/Perspective/Perspective.sfc',
+];
+mkdirSync(join(dir, 'snes'), { recursive: true });
+for (const f of SNES_FILES) {
+  await download(`https://raw.githubusercontent.com/PeterLemon/SNES/master/${f}`, join(dir, 'snes', f.split('/').pop()));
+}

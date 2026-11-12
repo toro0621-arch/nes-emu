@@ -27,6 +27,7 @@ npm run build
 
 - [x] ワンダースワン・ワンダースワンカラー（`src/ws/`）。.ws / .wsc を読み込むと自動で切り替わる。白黒・カラー（2 ビット・4 ビット）、スプライトとウィンドウ、音（波形メモリ・PCM・スイープ・ノイズ・サウンド DMA）、SRAM と EEPROM のセーブ、時計。縦持ちのソフトは画面を回し、十字キーを Y ボタンに割り当てる。CPU は NEC V20 の実機テスト（SingleStepTests/v20）で確かめた（未定義のフラグを除き、ほぼすべて一致）
 - [x] ゲームボーイアドバンス（`src/gba/`）。.gba を読み込むと自動で切り替わり、L・R ボタンが出る。CPU（ARM7TDMI。ARM と Thumb）、画面（モード 0〜5、回転拡大、スプライト、ウィンドウ、半透明・明るさ、モザイク）、DMA、タイマー、音（ゲームボーイと同じ 4 チャンネル＋ PCM の FIFO 2 つ）、セーブ（SRAM・フラッシュ 64K / 128K・EEPROM。ROM の中の印で見分ける）、カートリッジの時計。BIOS は任天堂のものではなく、一から書かれた互換の BIOS（[Cult-of-GBA BIOS](https://github.com/Cult-of-GBA/BIOS)、MIT）を使う。起動画面は飛ばす。CPU は jsmolka/gba-tests と FuzzARM（ランダムな 1 万命令）で確かめた
+- [x] スーパーファミコン（`src/snes/`）。.sfc / .smc を読み込むと自動で切り替わり、A・B・X・Y のひし形と L・R が出る。CPU（65C816）、音（SPC700 + DSP。BRR・ADSR・エコー・ノイズ・ピッチモジュレーション）、画面（モード 0〜7、オフセットパータイル、高解像度、スプライト、ウィンドウ、カラー演算、モザイク、明るさ）、DMA・HDMA、H・V の IRQ、LoROM・HiROM・ExHiROM、SRAM。音の CPU の起動用プログラム（IPL）は任天堂のものではなく、同じやりとりをするように一から書いたもの。追加チップ（スーパーFX・SA-1・DSP など）が要るソフトはまだ動かない（読み込むとそう出る）。CPU は SingleStepTests の 65816（約 500 万件）と spc700（25 万 6 千件）をすべて通過
 - [x] 追加：ゲームのセーブデータを .sav に書き出す・読み込む（全機種。ほかのエミュレータのセーブも使える）、GBA の「液晶っぽい色」（当時の液晶のように色を落ち着かせる）、GBA の待ちループ飛ばし（ゲームが値の変化を待ってくり返しているだけのときは、次の出来事まで時間を飛ばして軽くする）
 
 ### 対応マッパー
@@ -57,7 +58,8 @@ npm run build
 | 十字キー | 左の十字キー（斜めも可） | 矢印キー |
 | A / B | 右の赤いボタン（A と B の間で両方） | X / Z |
 | START / SELECT | 下の細いボタン | Enter / Shift |
-| L / R（ゲームボーイアドバンス） | 十字キーと A・B の上 | A / S |
+| L / R（ゲームボーイアドバンス・スーパーファミコン） | 十字キーと A・B の上 | A / S |
+| X / Y（スーパーファミコン） | A・B とひし形に並ぶ（上 X・左 Y） | D / C |
 
 ## スマホに入れる（PWA）
 1. `npm run build` でできた `dist/` を HTTPS のサーバーに置く（GitHub Pages・Cloudflare Pages など。どの URL の下でも動く）
@@ -90,6 +92,7 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `src/gb/palettes.ts` | 白黒のソフトの色づけ（パレットと、題名からの「おまかせ」） |
 | `src/ws/` | ワンダースワン。`cpu.ts`（V30MZ ＝ 8086 / 80186 互換）、`ws.ts`（メモリ・I/O ポート・割り込み・タイマー・ボタン・DMA・EEPROM・時計）、`display.ts`（画面）、`sound.ts`（音） |
 | `src/gba/` | ゲームボーイアドバンス。`cpu.ts`（ARM7TDMI。命令のビットから引く表で ARM・Thumb を実行）、`gba.ts`（メモリ・I/O・DMA・タイマー・割り込み・待ち時間・1 フレームの流れ）、`ppu.ts`（画面。ライン単位で描く）、`apu.ts`（音）、`save.ts`（SRAM・フラッシュ・EEPROM・時計）、`bios.ts`（互換 BIOS） |
+| `src/snes/` | スーパーファミコン。`cpu.ts`（65C816）、`snes.ts`（メモリの並び・I/O・DMA と HDMA・割り込み・コントローラー・1 フレームの流れ）、`cart.ts`（ヘッダーから LoROM・HiROM・ExHiROM と SRAM を決める）、`ppu.ts`（画面。ライン単位で描く）、`spc700.ts`・`dsp.ts`・`apu.ts`（音。起動用のプログラムも） |
 | `src/machine.ts` | ファミコンとゲームボーイを、アプリから同じように扱うための窓口（ROM の中身から本体を決める） |
 | `src/gb/` | ゲームボーイ。`cpu.ts`（SM83。読み書き 1 回ごとに 1 M サイクル進める）、`gb.ts`（メモリ・タイマー・DMA・ボタン・倍速）、`ppu.ts`（画面。ライン単位で描く）、`apu.ts`（音）、`cart.ts`（MBC・時計） |
 | `src/savestate.ts` | どこでもセーブ。CPU・PPU・APU・バス・マッパーのフィールドをたどって写し取り、書き戻す（ROM・関数・部品どうしの参照は写さない） |
@@ -100,6 +103,7 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `test/mappers.test.ts` | MMC1・MMC3 を使う blargg のテスト ROM |
 | `test/mapper-units.test.ts` | 各マッパーのバンク切り替え・IRQ を直接確かめる |
 | `test/ws.test.ts` | ワンダースワン：テスト用のプログラムをその場で組み立てて、割り込み・画面・ボタン・縦持ち・セーブを確かめる |
+| `test/snes.test.ts` | スーパーファミコン：手で組み立てた小さなプログラム（背景色・A・B・X・Y・L・R）、どこでもセーブ、SRAM、追加チップのソフトを断る、PeterLemon さんの CPU・SPC700 のテスト、BRR の音、モード 7 と HDMA |
 | `test/gba.test.ts` | ゲームボーイアドバンス：手で組み立てた小さなプログラム（画面・ボタン・L / R）、どこでもセーブ、EEPROM、jsmolka/gba-tests と FuzzARM |
 | `test/gb.test.ts` | ゲームボーイ：blargg のテスト ROM、画面（スプライト・ウィンドウ・カラーのパレット）、MBC、どこでもセーブ |
 | `test/savestate.test.ts` | セーブしたところから動かし直すと、画面・RAM・音が同じになるか |

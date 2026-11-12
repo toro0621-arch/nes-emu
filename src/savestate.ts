@@ -10,7 +10,7 @@ export const STATE_VERSION = 1;
 export interface SaveState {
   version: number;
   /** 本体（ないものはファミコン） */
-  system?: 'nes' | 'gb' | 'ws' | 'gba';
+  system?: 'nes' | 'gb' | 'ws' | 'gba' | 'snes';
   mapper: number;
   parts: Record<string, unknown>;
 }
@@ -34,7 +34,7 @@ export function saveState(nes: Nes): SaveState {
  * 部品（CPU・画面・音など）のフィールドを写し取る。skip にあるもの（ほかの部品・ROM）は写さない
  */
 export function captureState(
-  system: 'nes' | 'gb' | 'ws' | 'gba',
+  system: 'nes' | 'gb' | 'ws' | 'gba' | 'snes',
   mapper: number,
   partsIn: Record<string, object>,
   skip: Set<unknown>,
@@ -73,7 +73,7 @@ export function loadState(nes: Nes, state: SaveState): void {
   nes.mapper.saveDirty = nes.mapper.saveRam !== null;
 }
 
-export function applyState(state: SaveState, system: 'nes' | 'gb' | 'ws' | 'gba', mapper: number, parts: Record<string, object>): void {
+export function applyState(state: SaveState, system: 'nes' | 'gb' | 'ws' | 'gba' | 'snes', mapper: number, parts: Record<string, object>): void {
   if (!state || state.version !== STATE_VERSION) throw new Error('このセーブは古い形式なので読み込めません');
   if ((state.system ?? 'nes') !== system || state.mapper !== mapper) throw new Error('別のゲームのセーブです');
 
