@@ -131,9 +131,10 @@ let currentRom: { name: string; data: Uint8Array } | null = null;
  * ROM を読み込んで動かし始める。セーブデータがあれば、ゲームが読む前に入れておく。
  * 読み込めなければ null、読み込めたらセーブデータを入れたかどうかを返す
  */
-async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: boolean } | null> {
+async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: boolean; resumed?: boolean } | null> {
   if (currentRom && currentRom.data === data) return { loadedSave: false };
   await flushSave(); // 前の ROM のセーブを書き出しておく
+  await autoSave(); // 前の ROM の続き
   let next: Machine;
   try {
     next = createMachine(data, name);
@@ -174,7 +175,47 @@ async function startRom(name: string, data: Uint8Array): Promise<{ loadedSave: b
   document.title = `${baseName(name)} - NES Emu`;
   acc = 0;
   keepScreenOn(true);
-  return { loadedSave };
+  rewind.clear();
+  // 前に遊んだところの続きがあれば、そこから
+  const resumed = await autoLoad(next, id);
+  return { loadedSave, resumed };
+}
+
+// ---- つづきから自動で再開 ----
+// アプリを離れる（ほかのアプリに切り替える・閉じる）たびに、どこでもセーブの「0 番」に今の状態を入れておく
+const AUTO_SLOT = 0;
+let autoSaving = false;
+async function autoSave(): Promise<void> {
+  const m = machine;
+  const id = currentId;
+  if (!m || !id || autoSaving) return;
+  autoSaving = true;
+  try {
+    await putState(id, AUTO_SLOT, { time: Date.now(), thumb: canvas.toDataURL('image/png'), state: m.saveState() });
+  } finally {
+    autoSaving = false;
+  }
+}
+async function autoLoad(m: Machine, id: string): Promise<boolean> {
+  const saved = await getState(id, AUTO_SLOT);
+  if (!saved || machine !== m) return false;
+  try {
+    m.loadState(saved.state as SaveState);
+  } catch {
+    return false; // 古い形式などは使わない
+  }
+  const img = new Image();
+  img.onload = () => ctx.drawImage(img, 0, 0);
+  img.src = saved.thumb;
+  return true;
+}
+/** 続きを捨てて、電源を入れ直したところから */
+function restartFromBeginning(): void {
+  if (!machine) return;
+  machine.reset();
+  rewind.clear();
+  acc = 0;
+  showToast('最初から始めました');
 }
 
 /** バッテリーバックアップの RAM が変わっていれば保存する */
@@ -187,7 +228,10 @@ async function flushSave(): Promise<void> {
 // ゲームは何度かに分けて書くことが多いので、1 秒ごとにまとめて保存。アプリを閉じる・切り替えるときはすぐ保存
 setInterval(() => void flushSave(), 1000);
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) void flushSave();
+  if (document.hidden) {
+    void flushSave();
+    void autoSave();
+  }
 });
 window.addEventListener('pagehide', () => {
   const mapper = machine;
@@ -216,7 +260,8 @@ romInput.addEventListener('change', async () => {
   const started = await startRom(name, data);
   closeMenu();
   if (!started) return;
-  if (started.loadedSave) showToast('セーブデータを読み込みました');
+  if (started.resumed) showToast('前のつづきから再開しました', { label: '最初から', run: restartFromBeginning });
+  else if (started.loadedSave) showToast('セーブデータを読み込みました');
 });
 
 // 前回の ROM があれば読み込んでおく（音は最初のタップで出始める）
@@ -224,7 +269,9 @@ void loadLastRom().then(async (rom) => {
   if (!rom || machine) return;
   // （ゲーム一覧ができる前に遊んでいた ROM も、ここで一覧に入る）
   const started = await startRom(rom.name, rom.data);
-  if (started) showToast(`前回の「${rom.name}」を読み込みました${started.loadedSave ? '（セーブデータあり）' : ''}`);
+  if (started?.resumed)
+    showToast(`「${baseName(rom.name)}」のつづきから再開しました`, { label: '最初から', run: restartFromBeginning });
+  else if (started) showToast(`前回の「${rom.name}」を読み込みました${started.loadedSave ? '（セーブデータあり）' : ''}`);
 });
 
 // ---- お知らせ ----
@@ -549,6 +596,7 @@ async function doLoad(slot: number): Promise<void> {
     showToast(e instanceof Error ? e.message : 'ロードできませんでした');
     return;
   }
+  rewind.clear();
   // 画面はセーブしたときの絵を出しておく（次のフレームで描き直される）
   const img = new Image();
   img.onload = () => ctx.drawImage(img, 0, 0);
@@ -645,6 +693,92 @@ function libraryRow(entry: LibraryEntry): HTMLLIElement {
   return li;
 }
 
+// ---- 巻き戻し ----
+// 10 フレームごとに状態を覚えておき（だいたい 10 秒ぶん。メモリは 24M バイトまで）、ボタンを押している間はそれを新しい順に戻す
+class Rewind {
+  private buf: SaveState[] = [];
+  private cap = 60;
+  private counter = 0;
+  active = false;
+  private popWait = 0;
+
+  clear(): void {
+    this.buf = [];
+    this.counter = 0;
+  }
+
+  /** ふつうに 1 フレーム進めたあと */
+  record(m: Machine): void {
+    if (++this.counter < 10) return;
+    this.counter = 0;
+    const st = m.saveState();
+    if (this.buf.length === 0) this.cap = Math.max(10, Math.min(60, Math.floor((24 << 20) / Math.max(1, stateBytes(st)))));
+    this.buf.push(st);
+    if (this.buf.length > this.cap) this.buf.shift();
+  }
+
+  /** 巻き戻し中の 1 フレーム：3 フレームに 1 回 1 つ前に戻り、その絵を出す。戻れなければ false */
+  step(m: Machine): boolean {
+    if (this.popWait > 0) {
+      this.popWait--;
+      return true;
+    }
+    // いちばん古いものは残しておく（そこで止まる）
+    const st = this.buf.length > 1 ? this.buf.pop() : this.buf[0];
+    if (!st) return false;
+    try {
+      m.loadState(st);
+    } catch {
+      this.clear();
+      return false;
+    }
+    this.popWait = 2;
+    // 1 フレームだけ動かして、その時点の絵を作る（音は出さない）
+    m.setButtons(0);
+    m.runFrame();
+    m.takeSamples();
+    this.last = st;
+    return true;
+  }
+  /** 最後に戻った状態（離したときにそこへ戻してから再開する） */
+  last: SaveState | null = null;
+}
+function stateBytes(v: unknown): number {
+  if (ArrayBuffer.isView(v)) return v.byteLength;
+  if (Array.isArray(v)) return v.reduce((a: number, x) => a + stateBytes(x), 0);
+  if (v && typeof v === 'object') return Object.values(v).reduce((a: number, x) => a + stateBytes(x), 0);
+  return 8;
+}
+const rewind = new Rewind();
+const rewindButton = $<HTMLButtonElement>('rewind');
+const rewindOn = (e: Event) => {
+  e.preventDefault();
+  if (!machine) return;
+  rewind.active = true;
+  rewind.last = null;
+  rewindButton.classList.add('on');
+};
+const rewindOff = () => {
+  if (!rewind.active) return;
+  rewind.active = false;
+  rewindButton.classList.remove('on');
+  // 最後に見せた状態から続ける
+  if (machine && rewind.last) machine.loadState(rewind.last);
+  rewind.last = null;
+  acc = 0;
+};
+rewindButton.addEventListener('pointerdown', rewindOn);
+rewindButton.addEventListener('pointerup', rewindOff);
+rewindButton.addEventListener('pointercancel', rewindOff);
+rewindButton.addEventListener('pointerleave', rewindOff);
+rewindButton.addEventListener('contextmenu', (e) => e.preventDefault());
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Backspace' && !e.repeat) rewindOn(e);
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Backspace') rewindOff();
+});
+
 // ---- 早送り ----
 const ffButton = $<HTMLButtonElement>('ff');
 /** 1〜3 倍は 0.25 刻み、その上は 4・6 倍 */
@@ -721,14 +855,26 @@ function loop(now: number): void {
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);
     let ran = false;
     // 半フレーム分たまったら 1 フレーム進める（60Hz 画面で毎回 1 フレームになるように）
+    let rewound = false;
     while (acc >= FRAME_MS / 2) {
+      if (rewind.active) {
+        // 巻き戻し中：ふつうの速さで、前の状態を順に見せる
+        rewind.step(machine);
+        rewound = true;
+        acc -= FRAME_MS * speed;
+        frames++;
+        ran = true;
+        continue;
+      }
       machine.setButtons(touch.read() | keyboard.read());
       machine.runFrame();
+      rewind.record(machine);
       acc -= FRAME_MS;
       frames++;
       ran = true;
     }
-    if (ran) {
+    if (ran && rewound) ctx.putImageData(image, -machine.crop, -machine.crop);
+    else if (ran) {
       // 上下左右の 8 ドットは、実機のテレビでも見えない部分（左端の線やスクロールのちらつきが出る）なので切り落とす
       ctx.putImageData(image, -machine.crop, -machine.crop);
       const samples = machine.takeSamples();

@@ -314,7 +314,13 @@ html.landscape #toast {
   white-space: nowrap;
 }
 
-/* ---- 早送り ---- */
+/* ---- 早送り・巻き戻し ---- */
+#rewind {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#rewind.on,
 #ff.on {
   background: var(--accent);
   border-color: var(--accent);
@@ -676,4 +682,27 @@ html[data-system='snes'] #ab [data-btn='B'] {
   bottom: auto;
   background: #d9a514;
   box-shadow: 0 3px 0 #8a6a0c;
+}
+
+/* ---- 細いスマホ（幅 380px 以下）：上のボタンが 1 行に収まるように ---- */
+header .btn {
+  white-space: nowrap;
+}
+#fps {
+  white-space: nowrap;
+}
+@media (max-width: 380px) {
+  header {
+    gap: 5px;
+    padding: 8px 8px;
+  }
+  header .btn {
+    padding: 8px 9px;
+  }
+  #menu-open .lbl {
+    display: none;
+  }
+  #fps {
+    font-size: 11px;
+  }
 }
