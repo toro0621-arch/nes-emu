@@ -21,6 +21,7 @@ import {
   saveSramNow,
   type LibraryEntry,
 } from './storage';
+import { SmoothScreen, type SmoothMode } from './smooth';
 import { keepScreenOn } from './wakelock';
 
 
@@ -350,6 +351,47 @@ stereoButton.addEventListener('click', () => {
   showStereo();
 });
 
+// ---- ドットをなめらかに（全部の本体で共通） ----
+const SMOOTH_KEY = 'nes-emu:smooth';
+const SMOOTH_MODES: [SmoothMode, string][] = [
+  ['off', 'オフ'],
+  ['light', '軽め'],
+  ['strong', '強め'],
+];
+const smooth = new SmoothScreen($('screen-wrap'));
+{
+  let m: SmoothMode = 'off';
+  try {
+    const v = localStorage.getItem(SMOOTH_KEY);
+    if (v === 'light' || v === 'strong') m = v;
+  } catch {
+    // 無視
+  }
+  smooth.setMode(m);
+}
+function renderSmooth(): void {
+  const el = $('smooth-modes');
+  el.replaceChildren();
+  for (const [mode, label] of SMOOTH_MODES) {
+    el.append(
+      button(
+        label,
+        () => {
+          if (!smooth.setMode(mode)) showToast('この端末では使えませんでした（GPU が使えません）');
+          try {
+            localStorage.setItem(SMOOTH_KEY, smooth.mode);
+          } catch {
+            // 無視
+          }
+          if (machine) smooth.draw(machine.frameBuffer, machine.width, machine.height, machine.crop);
+          renderSmooth();
+        },
+        'btn' + (mode === smooth.mode ? ' accent' : ''),
+      ),
+    );
+  }
+}
+
 // ---- 液晶っぽい色（ゲームボーイアドバンス。全部のソフトで共通） ----
 const LCD_KEY = 'nes-emu:gba-lcd';
 let lcdColor = false;
@@ -491,6 +533,7 @@ async function openMenu(): Promise<void> {
   renderPalettes();
   renderLcd();
   renderSram();
+  renderSmooth();
   renderFfSpeeds();
   menuOpen = true; // 開いている間はゲームを止める
   menu.hidden = false;
@@ -873,6 +916,7 @@ function loop(now: number): void {
       frames++;
       ran = true;
     }
+    if (ran) smooth.draw(machine.frameBuffer, machine.width, machine.height, machine.crop);
     if (ran && rewound) ctx.putImageData(image, -machine.crop, -machine.crop);
     else if (ran) {
       // 上下左右の 8 ドットは、実機のテレビでも見えない部分（左端の線やスクロールのちらつきが出る）なので切り落とす

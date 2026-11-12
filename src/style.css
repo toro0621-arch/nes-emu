@@ -64,6 +64,17 @@ header {
   display: block;
   image-rendering: pixelated;
 }
+/* なめらかにしたとき：GPU で描いた画面を上に重ねる（下の画面はセーブの絵に使う） */
+#screen-gl {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#screen-gl[hidden] {
+  display: none;
+}
 #message {
   position: absolute;
   inset: 0;
