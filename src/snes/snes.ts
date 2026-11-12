@@ -3,6 +3,7 @@
 import { SnesApu } from './apu';
 import { cartInfo, mirrorRom, stripCopier, type SnesCartInfo } from './cart';
 import { W65816, type W65Bus } from './cpu';
+import { Dsp1 } from './dsp1';
 import { SnesPpu } from './ppu';
 
 /** 1 ラインのマスタークロック数と、1 フレームのライン数（NTSC） */
@@ -31,6 +32,8 @@ export class Snes implements W65Bus {
   private romMask: number;
   sram: Uint8Array;
   sramDirty = false;
+  /** 追加チップ DSP-1（なければ null） */
+  readonly dsp1: Dsp1 | null;
   private wram = new Uint8Array(0x20000);
   private wramAddr = 0;
   /** データバスに最後に乗った値（何もないところを読むと返る） */
@@ -74,6 +77,7 @@ export class Snes implements W65Bus {
     this.rom = mirrorRom(raw);
     this.romMask = this.rom.length - 1;
     this.sram = new Uint8Array(this.info.sramSize || 0);
+    this.dsp1 = this.info.dsp1 ? new Dsp1() : null;
     this.fastRom = false;
     this.cpu = new W65816(this);
     this.ppu.counters = () => [Math.min(339, Math.floor((this.cycles - this.lineStart) / 4)), this.line];
@@ -180,7 +184,27 @@ export class Snes implements W65Bus {
 
   // ───────── カートリッジ ─────────
 
+  /** DSP-1 の場所なら 0 = データ、1 = ステータス、それ以外は -1 */
+  private dspPort(bank: number, off: number): number {
+    const b = bank & 0x7f;
+    if (this.info.map === 'lorom') {
+      if (this.info.romSize > 0x100000) {
+        // 大きい LoROM：$60〜$6F の $0000〜$7FFF
+        if (b >= 0x60 && b < 0x70 && off < 0x8000) return off & 0x4000 ? 1 : 0;
+      } else if (b >= 0x30 && b < 0x40 && off >= 0x8000) return off & 0x4000 ? 1 : 0; // スーパーマリオカートなど
+      return -1;
+    }
+    // HiROM：$00〜$1F の $6000〜$7FFF
+    if (b < 0x20 && off >= 0x6000 && off < 0x8000) return off & 0x1000 ? 1 : 0;
+    return -1;
+  }
+
   private cartRead(bank: number, off: number): number {
+    if (this.dsp1) {
+      const port = this.dspPort(bank, off);
+      if (port === 0) return this.dsp1.readData();
+      if (port === 1) return this.dsp1.readStatus();
+    }
     const map = this.info.map;
     const sram = this.sram;
     if (map === 'lorom') {
@@ -202,6 +226,10 @@ export class Snes implements W65Bus {
   }
 
   private cartWrite(bank: number, off: number, v: number): void {
+    if (this.dsp1 && this.dspPort(bank, off) === 0) {
+      this.dsp1.writeData(v);
+      return;
+    }
     const sram = this.sram;
     if (!sram.length) return;
     const b = bank & 0x7f;

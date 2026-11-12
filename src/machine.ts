@@ -518,11 +518,13 @@ class SnesMachine implements Machine {
   afterSaveLoaded() {}
   private parts(): Record<string, object> {
     const s = this.snes;
-    return { snes: s, cpu: s.cpu, ppu: s.ppu, apu: s.apu, spc: s.apu.spc, dsp: s.apu.dsp };
+    const parts: Record<string, object> = { snes: s, cpu: s.cpu, ppu: s.ppu, apu: s.apu, spc: s.apu.spc, dsp: s.apu.dsp };
+    if (s.dsp1) parts.dsp1 = s.dsp1;
+    return parts;
   }
   saveState() {
     const s = this.snes;
-    const skip = new Set<unknown>([s, s.cpu, s.ppu, s.apu, s.apu.spc, s.apu.dsp, s.info, ...s.stateSkip()]);
+    const skip = new Set<unknown>([s, s.cpu, s.ppu, s.apu, s.apu.spc, s.apu.dsp, s.dsp1, s.info, ...s.stateSkip()]);
     return captureState('snes', this.data.length, this.parts(), skip);
   }
   loadState(st: SaveState) {

@@ -10,6 +10,10 @@ export interface SnesCartInfo {
   battery: boolean;
   /** 追加チップの名前（対応していないもの）。なければ null */
   chip: string | null;
+  /** DSP-1 が入っている（対応しているチップ） */
+  dsp1: boolean;
+  /** ROM の大きさ（バイト。DSP-1 の置き場所を決める） */
+  romSize: number;
   fastRom: boolean;
 }
 
@@ -91,8 +95,22 @@ export function cartInfo(rom: Uint8Array): SnesCartInfo {
   const hasRam = [1, 2, 4, 5].includes(type & 0x0f);
   const sramSize = hasRam && sramCode > 0 ? 1024 << Math.min(sramCode, 8) : 0;
   const battery = (type & 0x0f) === 2 || (type & 0x0f) === 5 || (type & 0x0f) === 6;
-  const chip = (type & 0x0f) >= 3 ? (CHIPS[type >> 4] ?? '特別なチップ') : null;
+  let chip = (type & 0x0f) >= 3 ? (CHIPS[type >> 4] ?? '特別なチップ') : null;
+  // DSP の中でも DSP-1 は動かせる（DSP-2〜4 は別の中身なのでタイトルで見分ける）
+  let dsp1 = false;
+  if (chip === 'DSP') {
+    const t = title.toUpperCase();
+    if (t.startsWith('DUNGEON MASTER')) chip = 'DSP-2';
+    else if (t.startsWith('SD') && t.includes('GUNDAM GX')) chip = 'DSP-3';
+    else if (t.startsWith('TOP GEAR 3000')) chip = 'DSP-4';
+    else {
+      chip = null;
+      dsp1 = true;
+    }
+  }
   return {
+    dsp1,
+    romSize: rom.length,
     map: h.map,
     title: title.trim(),
     sramSize,

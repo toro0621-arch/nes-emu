@@ -102,6 +102,27 @@ describe('スーパーファミコン', () => {
     expect(m.saveDirty).toBe(true);
   });
 
+  it('DSP-1 のカートリッジ（スーパーマリオカートと同じ $30:8000 に置かれる）', () => {
+    const w = (v: number) => [0xa9, v, 0x8f, 0x00, 0x80, 0x30]; // lda #v; sta $308000
+    const code = [
+      ...w(0x00), // かけ算
+      ...w(0x00),
+      ...w(0x40), // 0x4000 = 0.5
+      ...w(0xe8),
+      ...w(0x03), // 1000
+      0xaf, 0x00, 0x80, 0x30, 0x8f, 0x00, 0x00, 0x7e, // lda $308000; sta $7E0000
+      0xaf, 0x00, 0x80, 0x30, 0x8f, 0x01, 0x00, 0x7e,
+      0xaf, 0x00, 0xc0, 0x30, 0x8f, 0x02, 0x00, 0x7e, // ステータス
+      0x80, 0xfe,
+    ];
+    const m = createMachine(makeRom(code, 0x05, 0x01), 'kart.sfc');
+    m.runFrame();
+    const snes = (m as unknown as { snes: Snes }).snes;
+    expect(snes.read(0x7e0000) | (snes.read(0x7e0001) << 8)).toBe(500);
+    expect(snes.read(0x7e0002) & 0x80).toBe(0x80);
+    expect(m.saveRam?.length).toBe(2048);
+  });
+
   it('追加チップが要るソフトは分かりやすく断る', () => {
     expect(() => createMachine(makeRom(PROGRAM, 0x15), 'fx.sfc')).toThrow(/スーパーFX/);
   });
