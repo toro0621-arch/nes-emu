@@ -107,7 +107,7 @@ export async function getBios(): Promise<{ data: Uint8Array; own: boolean }> {
 }
 
 /** 数字の ID（どこでもセーブの取り違えを防ぐ） */
-function numId(id: string): number {
+export function numId(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) | 0;
   return h >>> 0;

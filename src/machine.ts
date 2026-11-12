@@ -557,9 +557,9 @@ export class PsxMachine implements Machine {
 
   constructor(
     private readonly bios: Uint8Array,
-    private readonly disc: Disc | null,
+    private disc: Disc | null,
     private readonly exe: Uint8Array | null,
-    private readonly id: number,
+    private id: number,
   ) {
     this.psx = this.make();
     this.fps = this.psx.fps;
@@ -575,6 +575,12 @@ export class PsxMachine implements Machine {
     return p;
   }
 
+  /** ディスクを入れかえる（何枚組のゲーム）。id は新しいディスクのどこでもセーブの ID */
+  swapDisc(disc: Disc, id: number): void {
+    this.disc = disc;
+    this.id = id;
+    this.psx.cdrom.swapDisc(disc);
+  }
   setPalette() {}
   get width() {
     return this.psx.gpu.outW;
@@ -667,6 +673,7 @@ export class PsxMachine implements Machine {
       p.mdec,
       p.sio,
       p.cdrom.disc,
+      this.disc,
       ...p.stateSkip(),
       ...p.gpu.stateSkip(),
       ...p.cdrom.stateSkip(),
@@ -677,6 +684,10 @@ export class PsxMachine implements Machine {
   }
   loadState(st: SaveState) {
     applyState(st, 'psx', this.id, this.parts());
+    // ディスクはセーブに入っていないので、今のディスクを入れ直す
+    const cd = this.psx.cdrom;
+    if (cd.lidOpen) cd.nextDisc = this.disc;
+    else cd.disc = this.disc;
     this.psx.gpu.render();
     this.psx.sio.cardDirty = true;
     this.psx.sio.buttons = this.pad;

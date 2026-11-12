@@ -5,11 +5,13 @@ import { TouchInput } from './input/touch';
 import { AUTO_ID, GB_PALETTES, MONO_ID, autoPalette } from './gb/palettes';
 import { DMG_COLORS } from './gb/ppu';
 import { createMachine, detectSystem, isPsxExe, type Machine, type System } from './machine';
-import { createPsx, discId, pickDisc } from './psx/load';
+import { createPsx, discId, numId, openDisc, pickDisc } from './psx/load';
+import type { PsxMachine } from './machine';
 import { stateFromJson, stateToJson, type SaveState } from './savestate';
 import { isZip, unzipRom } from './zip';
 import {
   deleteLibrary,
+  getLibrary,
   getState,
   listLibrary,
   loadBios,
@@ -144,6 +146,9 @@ for (const type of ['pointerup', 'touchend', 'keydown', 'click']) {
 
 /** 遊んでいる ROM の ID（セーブデータの保存先） */
 let currentId: string | null = null;
+/** ゲームのセーブデータ（メモリーカード）の保存先。ふつうは currentId と同じ。
+ * プレイステーションの何枚組のゲームは、1 枚目のメモリーカードを 2 枚目以降でも使う */
+let currentSaveId: string | null = null;
 let currentRom: { name: string; data: Uint8Array } | null = null;
 /** プレイステーションの CD のファイル */
 let currentFiles: DiscFile[] | null = null;
@@ -157,6 +162,7 @@ async function startRom(
   data: Uint8Array,
   files?: DiscFile[],
   knownId?: string,
+  cardId?: string,
 ): Promise<{ loadedSave: boolean; resumed?: boolean } | null> {
   if (currentRom && currentRom.data === data && !files) return { loadedSave: false };
   if (files && knownId && knownId === currentId) return { loadedSave: false };
@@ -169,11 +175,14 @@ async function startRom(
       // プレイステーション：BIOS と CD を読む（少し時間がかかる）
       message.textContent = '読み込み中…';
       discKey = files ? (knownId ?? (await discId(files))) : null;
+      // 何枚組で、前に 1 枚目のメモリーカードと結びつけたディスク
+      if (discKey && !cardId) cardId = (await getLibrary(discKey))?.cardId;
       next = await createPsx(discKey ?? (await romId(data)), files ?? null, files ? null : data);
     } else next = createMachine(data, name);
   } catch (e) {
     machine = null;
     currentId = null;
+    currentSaveId = null;
     currentRom = null;
     resetButton.disabled = true;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -185,7 +194,7 @@ async function startRom(
   let loadedSave = false;
   const ram = next.saveRam;
   if (ram) {
-    const saved = await loadSram(id);
+    const saved = await loadSram(cardId ?? id);
     if (saved) {
       ram.set(saved.subarray(0, ram.length));
       loadedSave = true;
@@ -195,11 +204,12 @@ async function startRom(
   }
   machine = next;
   currentId = id;
+  currentSaveId = cardId ?? id;
   currentRom = { name, data };
   currentFiles = files ?? null;
   // ゲーム一覧に入れる（最後に遊んだ時刻を更新）と、次に開いたときに読み込む ROM として覚える
   if (files) {
-    void putLibraryChecked({ id, name, data, files, lastPlayed: Date.now() }).then((ok) => {
+    void putLibraryChecked({ id, name, data, files, lastPlayed: Date.now(), ...(cardId ? { cardId } : {}) }).then((ok) => {
       if (!ok) showToast('端末の空きが足りず、ゲーム一覧に入れられませんでした（今は遊べます）');
     });
     void saveLastRom({ name, data, ref: id });
@@ -263,9 +273,10 @@ function restartFromBeginning(): void {
 /** バッテリーバックアップの RAM が変わっていれば保存する */
 async function flushSave(): Promise<void> {
   const mapper = machine;
-  if (!mapper?.saveRam || !mapper.saveDirty || !currentId) return;
+  const id = currentSaveId;
+  if (!mapper?.saveRam || !mapper.saveDirty || !id) return;
   mapper.saveDirty = false;
-  if (!(await saveSram(currentId, mapper.saveRam))) mapper.saveDirty = true;
+  if (!(await saveSram(id, mapper.saveRam))) mapper.saveDirty = true;
 }
 // ゲームは何度かに分けて書くことが多いので、1 秒ごとにまとめて保存。アプリを閉じる・切り替えるときはすぐ保存
 setInterval(() => void flushSave(), 1000);
@@ -277,8 +288,8 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', () => {
   const mapper = machine;
-  if (mapper?.saveRam && mapper.saveDirty && currentId) {
-    saveSramNow(currentId, mapper.saveRam);
+  if (mapper?.saveRam && mapper.saveDirty && currentSaveId) {
+    saveSramNow(currentSaveId, mapper.saveRam);
     mapper.saveDirty = false;
   }
 });
@@ -325,7 +336,7 @@ romInput.addEventListener('change', async () => {
 void loadLastRom().then(async (rom) => {
   if (!rom || machine) return;
   // （ゲーム一覧ができる前に遊んでいた ROM も、ここで一覧に入る）
-  const started = await startRom(rom.name, rom.data, rom.files, rom.ref);
+  const started = await startRom(rom.name, rom.data, rom.files, rom.ref, rom.cardId);
   if (started?.resumed)
     showToast(`「${baseName(rom.name)}」のつづきから再開しました`, { label: '最初から', run: restartFromBeginning });
   else if (started) showToast(`前回の「${rom.name}」を読み込みました${started.loadedSave ? '（セーブデータあり）' : ''}`);
@@ -512,8 +523,9 @@ savFile.addEventListener('change', async () => {
   savFile.value = '';
   const m = machine;
   const rom = currentRom;
-  const id = currentId;
-  if (!file || !m?.saveRam || !rom || !id) return;
+  const id = currentSaveId;
+  const gameId = currentId;
+  if (!file || !m?.saveRam || !rom || !id || !gameId) return;
   if (!confirm(`「${baseName(rom.name)}」のいまのセーブデータを、読み込むファイルで上書きして、ゲームを最初から始めます。よろしいですか？`)) return;
   const bytes = new Uint8Array(await file.arrayBuffer());
   // ファイルが短ければ足りないところはいまのまま、長ければ余りは使わない
@@ -527,9 +539,51 @@ savFile.addEventListener('change', async () => {
   m.saveDirty = false;
   currentRom = null;
   currentId = null;
-  const started = await startRom(rom.name, rom.data, currentFiles ?? undefined);
+  const started = await startRom(rom.name, rom.data, currentFiles ?? undefined, currentFiles ? gameId : undefined, id !== gameId ? id : undefined);
   closeMenu();
   showToast(started?.loadedSave ? 'セーブデータを読み込みました' : 'セーブデータを読み込めませんでした');
+});
+
+// ---- プレイステーションのディスクの入れかえ ----
+$<HTMLInputElement>('disc-file').addEventListener('change', async (e) => {
+  const input = e.target as HTMLInputElement;
+  const all = Array.from(input.files ?? []);
+  input.value = '';
+  const m = machine;
+  if (!all.length || m?.system !== 'psx' || !currentSaveId) return;
+  const pick = await pickDisc(all);
+  if (!pick) {
+    showToast('CD のイメージ（.cue と .bin、または .iso）を選んでください');
+    return;
+  }
+  if ('error' in pick) {
+    showToast(pick.error);
+    return;
+  }
+  try {
+    const id = await discId(pick.files);
+    if (id === currentId) {
+      showToast('今入っているディスクと同じです');
+      return;
+    }
+    const disc = await openDisc(pick.files);
+    await flushSave();
+    await autoSave();
+    (m as PsxMachine).swapDisc(disc, numId(id));
+    // これからは新しいディスクとして続ける（メモリーカードは同じものを使う）
+    const cardId = currentSaveId;
+    currentId = id;
+    currentRom = { name: pick.name, data: new Uint8Array(0) };
+    currentFiles = pick.files;
+    rewind.clear();
+    void putLibraryChecked({ id, name: pick.name, data: currentRom.data, files: pick.files, lastPlayed: Date.now(), cardId });
+    void saveLastRom({ name: pick.name, data: currentRom.data, ref: id });
+    document.title = `${baseName(pick.name)} - NES Emu`;
+    closeMenu();
+    showToast(`「${pick.name}」に入れかえました`);
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : 'ディスクを読み込めませんでした');
+  }
 });
 
 // ---- プレイステーションの BIOS ----
@@ -634,6 +688,7 @@ async function openMenu(): Promise<void> {
   renderSmooth();
   renderFfSpeeds();
   void renderBios();
+  $('disc-section').hidden = machine?.system !== 'psx' || !currentFiles;
   menuOpen = true; // 開いている間はゲームを止める
   menu.hidden = false;
   await Promise.all([renderSlots(), renderLibrary()]);
@@ -865,7 +920,7 @@ function libraryRow(entry: LibraryEntry): HTMLLIElement {
   play.addEventListener('click', async () => {
     if (playing) return closeMenu();
     closeMenu();
-    const started = await startRom(entry.name, entry.data, entry.files, entry.id);
+    const started = await startRom(entry.name, entry.data, entry.files, entry.id, entry.cardId);
     if (started?.resumed) showToast('前のつづきから再開しました', { label: '最初から', run: restartFromBeginning });
     else if (started?.loadedSave) showToast('セーブデータを読み込みました');
   });

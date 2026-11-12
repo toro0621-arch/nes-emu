@@ -165,4 +165,19 @@ describe('PlayStation のテストプログラム（npm run fetch-test-roms で 
     m.setButtons(BUTTON.A | BUTTON.L2);
     expect(m.psx.sio.buttons).toBe((1 << 13) | (1 << 8));
   });
+
+  it('ディスクの入れかえ：ふたが開き、1 秒ほどで新しいディスクが入る', () => {
+    if (!existsSync(join(ROMS, 'PSXNICCC.exe'))) return;
+    const exe = new Uint8Array(readFileSync(join(ROMS, 'PSXNICCC.exe')));
+    const d1 = Disc.fromSingle(new ArraySource(makeDisc(exe)));
+    const d2 = Disc.fromSingle(new ArraySource(makeDisc(exe)));
+    const m = new PsxMachine(BIOS, d1, null, 1);
+    for (let i = 0; i < 60; i++) m.runFrame();
+    m.swapDisc(d2, 2);
+    expect(m.psx.cdrom.lidOpen).toBe(true);
+    expect(m.psx.cdrom.stat & 0x10).toBe(0x10);
+    for (let i = 0; i < 90; i++) m.runFrame();
+    expect(m.psx.cdrom.lidOpen).toBe(false);
+    expect(m.psx.cdrom.disc).toBe(d2);
+  });
 });

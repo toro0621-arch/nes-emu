@@ -16,6 +16,7 @@ export interface SavedRom {
   /** プレイステーションの CD は大きいので、ゲーム一覧の ID だけ覚えておく */
   ref?: string;
   files?: DiscFile[];
+  cardId?: string;
 }
 
 /** CD のイメージのファイル（.bin・.cue・.iso）。大きいので中身は読み込まずに持つ */
@@ -76,7 +77,7 @@ export async function loadLastRom(): Promise<SavedRom | null> {
     const rom = await run<SavedRom | undefined>('readonly', (s) => s.get(LAST));
     if (rom?.ref) {
       const e = await getLibrary(rom.ref);
-      return e ? { name: e.name, data: e.data, ref: e.id, files: e.files } : null;
+      return e ? { name: e.name, data: e.data, ref: e.id, files: e.files, cardId: e.cardId } : null;
     }
     return rom && rom.data instanceof Uint8Array ? rom : null;
   } catch {
@@ -159,6 +160,8 @@ export interface LibraryEntry {
   lastPlayed: number;
   /** プレイステーションの CD（あれば data は空） */
   files?: DiscFile[];
+  /** メモリーカードを別のディスク（何枚組の 1 枚目）と一緒に使うとき、その ID */
+  cardId?: string;
 }
 
 export async function getLibrary(id: string): Promise<LibraryEntry | null> {

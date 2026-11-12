@@ -138,9 +138,27 @@ export class Cdrom {
     private raiseIrq: () => void,
   ) {}
 
+  /** ふたが開いている（ディスクの入れかえ中） */
+  lidOpen = false;
+  nextDisc: Disc | null = null;
+  private closeAt = -1;
+
+  /** ふたを開けてディスクを入れかえ、少したってから閉じる */
+  swapDisc(d: Disc | null, delay = CLOCK): void {
+    this.stopReading();
+    this.disc = null;
+    this.lidOpen = true;
+    this.stat = (this.stat | 0x10) & ~0x02;
+    this.nextDisc = d;
+    this.closeAt = this.now() + delay;
+    this.sectorReady = false;
+    this.dataLen = this.dataPos = 0;
+  }
+
   /** 次に何か起きる時刻 */
   nextEvent(): number {
     let t = Infinity;
+    if (this.closeAt >= 0) t = Math.min(t, this.closeAt);
     if (this.cmdAt >= 0) t = Math.min(t, this.cmdAt);
     if (this.secondAt >= 0 && this.intFlag === 0) t = Math.min(t, this.secondAt);
     if (this.queueAt >= 0) t = Math.min(t, this.queueAt);
@@ -151,6 +169,15 @@ export class Cdrom {
   /** 時刻が来たものを処理する */
   tick(): void {
     const now = this.now();
+    if (this.closeAt >= 0 && now >= this.closeAt) {
+      // ふたを閉じる：新しいディスクでモーターが回る（「開いた」印は GetStat で消える）
+      this.closeAt = -1;
+      this.lidOpen = false;
+      this.disc = this.nextDisc;
+      this.nextDisc = null;
+      if (this.disc) this.stat |= 0x02;
+      this.pos = 150;
+    }
     if (this.cmdAt >= 0 && now >= this.cmdAt) {
       this.cmdAt = -1;
       const c = this.cmd;
@@ -360,13 +387,13 @@ export class Cdrom {
     const p = this.params;
     this.params = [];
     if (!this.disc && c !== 0x01 && c !== 0x19 && c !== 0x0a && c !== 0x0e && c !== 0x1a) {
-      this.error(0x80);
+      this.error(this.lidOpen ? 0x08 : 0x80);
       return;
     }
     switch (c) {
       case 0x01: // GetStat
         this.ack();
-        this.stat &= ~0x10;
+        if (!this.lidOpen) this.stat &= ~0x10;
         return;
       case 0x02: // Setloc
         if (p.length < 3) return this.error(0x20);
@@ -656,6 +683,6 @@ export class Cdrom {
   }
 
   stateSkip(): unknown[] {
-    return [this.disc, this.audio, this.xaL, this.xaR];
+    return [this.disc, this.nextDisc, this.audio, this.xaL, this.xaR];
   }
 }
