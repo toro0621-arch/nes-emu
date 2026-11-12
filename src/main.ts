@@ -336,21 +336,33 @@ const toast = $('toast');
 const toastText = $('toast-text');
 const toastAction = $<HTMLButtonElement>('toast-action');
 let toastTimer = 0;
-function showToast(text: string, action?: { label: string; run: () => void }): void {
+function showToast(text: string, action?: { label: string; run: () => void; sticky?: boolean }): void {
   toastText.textContent = text;
   toastAction.hidden = !action;
   toastAction.textContent = action?.label ?? '';
-  toastAction.onclick = action ? () => action.run() : null;
+  toastAction.onclick = action
+    ? (e) => {
+        e.stopPropagation();
+        hideToast();
+        action.run();
+      }
+    : null;
   toast.hidden = false;
   clearTimeout(toastTimer);
-  // ボタン付き（更新のお知らせ）は押されるまで出しておく
-  if (!action) toastTimer = window.setTimeout(() => (toast.hidden = true), 3000);
+  // 更新のお知らせだけは押されるまで出しておく。ほかはしばらくしたら消える（ボタン付きは長めに）
+  if (!action?.sticky) toastTimer = window.setTimeout(hideToast, action ? 6000 : 3000);
 }
+function hideToast(): void {
+  clearTimeout(toastTimer);
+  toast.hidden = true;
+}
+// お知らせを押すと（ボタン以外のところ）すぐ消える
+toast.addEventListener('click', hideToast);
 
 // ---- PWA（オフライン対応・更新） ----
 const updateSW = registerSW({
   onNeedRefresh() {
-    showToast('新しいバージョンがあります', { label: '更新', run: () => void updateSW(true) });
+    showToast('新しいバージョンがあります', { label: '更新', run: () => void updateSW(true), sticky: true });
   },
   onOfflineReady() {
     showToast('オフラインでも使えるようになりました');
