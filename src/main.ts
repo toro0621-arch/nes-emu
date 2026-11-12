@@ -6,7 +6,7 @@ import { AUTO_ID, GB_PALETTES, MONO_ID, autoPalette } from './gb/palettes';
 import { DMG_COLORS } from './gb/ppu';
 import { createMachine, detectSystem, isPsxExe, type Machine, type System } from './machine';
 import { createPsx, discId, pickDisc } from './psx/load';
-import type { SaveState } from './savestate';
+import { stateFromJson, stateToJson, type SaveState } from './savestate';
 import { isZip, unzipRom } from './zip';
 import {
   deleteLibrary,
@@ -689,10 +689,12 @@ async function renderSlots(): Promise<void> {
   slotsEl.replaceChildren();
   const id = currentId;
   if (!machine || !id) {
+    $('state-file-row').hidden = true;
     slotsHint.textContent = 'ゲームを選ぶと使えます';
     return;
   }
-  slotsHint.textContent = '好きなところで保存して、いつでもそこから続けられます';
+  slotsHint.textContent = '好きなところで保存して、いつでもそこから続けられます（⤓ でファイルに書き出せます）';
+  $('state-file-row').hidden = false;
   for (let slot = 1; slot <= SLOTS; slot++) {
     const saved = await getState(id, slot);
     const row = document.createElement('div');
@@ -713,9 +715,46 @@ async function renderSlots(): Promise<void> {
     const load = button('ロード', () => void doLoad(slot), 'btn accent');
     load.disabled = !saved;
     row.append(thumb, info, save, load);
+    if (saved) {
+      // ファイルに書き出す（バックアップ・不具合の調査用）
+      const exp = button('⤓', () => exportState(slot, saved), 'btn');
+      exp.title = 'ファイルに書き出す';
+      exp.setAttribute('aria-label', `スロット ${slot} をファイルに書き出す`);
+      row.append(exp);
+    }
     slotsEl.append(row);
   }
 }
+
+function exportState(slot: number, saved: { time: number; thumb: string; state: unknown }): void {
+  if (!currentRom) return;
+  const text = stateToJson(saved.state, { game: currentRom.name, time: saved.time, thumb: saved.thumb });
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${baseName(currentRom.name)}-slot${slot}.state.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  showToast('どこでもセーブをファイルに書き出しました');
+}
+$<HTMLInputElement>('state-file').addEventListener('change', async (e) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !machine) return;
+  try {
+    const { state } = stateFromJson(await file.text());
+    machine.loadState(state);
+    rewind.clear();
+    acc = 0;
+    closeMenu();
+    showToast('ファイルからロードしました');
+  } catch (err) {
+    showToast(err instanceof Error && err.message.includes('セーブ') ? err.message : 'このファイルは読み込めませんでした');
+  }
+});
 
 async function doSave(slot: number): Promise<void> {
   if (!machine || !currentId) return;

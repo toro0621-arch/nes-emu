@@ -415,9 +415,9 @@ html.landscape .menu-panel {
 }
 .slot {
   display: grid;
-  grid-template-columns: 72px 1fr auto auto;
+  grid-template-columns: 72px 1fr auto auto auto;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 0;
 }
 .slot .thumb {
@@ -781,4 +781,13 @@ html[data-system='psx'] #ab [data-btn='Y'] {
 }
 html[data-system='psx'] #ab .round.pressed {
   background: #44444f;
+}
+@media (max-width: 360px) {
+  .slot {
+    grid-template-columns: 56px 1fr auto auto auto;
+    gap: 6px;
+  }
+  .slot .thumb {
+    width: 56px;
+  }
 }

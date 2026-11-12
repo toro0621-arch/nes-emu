@@ -116,3 +116,45 @@ function structuredCloneArray(v: unknown[]): unknown[] {
 function partsOf(nes: Nes): Record<string, object> {
   return { cpu: nes.cpu, ppu: nes.ppu, apu: nes.apu, bus: nes.bus, mapper: nes.mapper };
 }
+
+// ---- ファイルにする（書き出し・読み込み） ----
+const TYPED: Record<string, new (b: ArrayBuffer) => ArrayBufferView> = {
+  Uint8Array,
+  Int8Array,
+  Uint16Array,
+  Int16Array,
+  Uint32Array,
+  Int32Array,
+  Float32Array,
+  Float64Array,
+  Uint8ClampedArray,
+};
+
+function toB64(u: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+/** どこでもセーブを JSON の文字列にする（型付き配列は base64） */
+export function stateToJson(state: unknown, extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({ ...extra, state }, (_k, v) => {
+    if (ArrayBuffer.isView(v) && !(v instanceof DataView)) {
+      const u = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+      return { $t: v.constructor.name, b: toB64(u) };
+    }
+    return v;
+  });
+}
+
+export function stateFromJson(text: string): { state: SaveState } & Record<string, unknown> {
+  return JSON.parse(text, (_k, v) => {
+    if (v && typeof v === 'object' && typeof v.$t === 'string' && typeof v.b === 'string' && TYPED[v.$t]) {
+      const bin = atob(v.b);
+      const u = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      return new TYPED[v.$t](u.buffer);
+    }
+    return v;
+  });
+}
