@@ -106,3 +106,20 @@ mkdirSync(join(dir, 'psx'), { recursive: true });
 for (const f of PSX_FILES) {
   await download(`https://raw.githubusercontent.com/PeterLemon/PSX/master/${f}`, join(dir, 'psx', f.split('/').pop()));
 }
+
+// NINTENDO64（PeterLemon さんのテスト。CPU の命令・RSP のベクトル演算・3D のデモ）
+const N64_FILES = [
+  'CPUTest/CPU/ADD/CPUADD.N64',
+  'CPUTest/CPU/DMULT/CPUDMULT.N64',
+  'CPUTest/CPU/DDIV/CPUDDIV.N64',
+  'CPUTest/CPU/LOADSTORE/LD/CPULD.N64',
+  'CPUTest/CPU/SHIFT/DSRA/CPUDSRA.N64',
+  'RSPTest/CP2/VMULF/RSPCP2VMULF.N64',
+  'RSPTest/CP2/VADD/RSPCP2VADD.N64',
+  'N64NICCC/N64NICCC.N64',
+  'HelloWorld/16BPP/HelloWorldRDP320x240/HelloWorldRDP16BPP320X240.N64',
+];
+mkdirSync(join(dir, 'n64'), { recursive: true });
+for (const f of N64_FILES) {
+  await download(`https://raw.githubusercontent.com/PeterLemon/N64/master/${f}`, join(dir, 'n64', f.split('/').pop()));
+}

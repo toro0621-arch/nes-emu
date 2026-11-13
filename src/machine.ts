@@ -18,6 +18,7 @@ import { isWsRom, Ws } from './ws/ws';
 import { Psx } from './psx/psx';
 import type { Disc } from './psx/disc';
 import { PAD } from './psx/sio';
+import { N64, N64PAD, isN64Rom } from './n64/n64';
 import type { RomPatch } from './cheats';
 
 function patchMap(p: RomPatch[]): Map<number, { val: number; cmp: number }> | null {
@@ -25,12 +26,13 @@ function patchMap(p: RomPatch[]): Map<number, { val: number; cmp: number }> | nu
   return new Map(p.map((x) => [x.addr, { val: x.val, cmp: x.cmp }]));
 }
 
-export type System = 'nes' | 'gb' | 'ws' | 'gba' | 'snes' | 'psx';
+export type System = 'nes' | 'gb' | 'ws' | 'gba' | 'snes' | 'psx' | 'n64';
 
 /** ROM の中身（とファイル名）から本体を決める。わからなければ null */
 export function detectSystem(data: Uint8Array, name = ''): System | null {
   if (data[0] === 0x4e && data[1] === 0x45 && data[2] === 0x53 && data[3] === 0x1a) return 'nes';
   if (isPsxExe(data)) return 'psx';
+  if (isN64Rom(data)) return 'n64';
   if (isGbaRom(data)) return 'gba';
   if (isGbRom(data)) return 'gb';
   if (/\.(sfc|smc)$/i.test(name)) return 'snes';
@@ -95,9 +97,11 @@ export function createMachine(data: Uint8Array, name = ''): Machine {
       return new GbaMachine(data);
     case 'snes':
       return new SnesMachine(data);
+    case 'n64':
+      return new N64Machine(data);
   }
   throw new Error(
-    'ファミコン（.nes）・ゲームボーイ（.gb / .gbc）・ワンダースワン（.ws / .wsc）・ゲームボーイアドバンス（.gba）・スーパーファミコン（.sfc / .smc）の ROM を選んでください',
+    'ファミコン（.nes）・ゲームボーイ（.gb / .gbc）・ワンダースワン（.ws / .wsc）・ゲームボーイアドバンス（.gba）・スーパーファミコン（.sfc / .smc）・NINTENDO64（.z64 / .n64 / .v64）の ROM を選んでください',
   );
 }
 
@@ -785,5 +789,114 @@ export class PsxMachine implements Machine {
     this.psx.gpu.render();
     this.psx.sio.cardDirty = true;
     this.psx.sio.buttons = this.pad;
+  }
+}
+
+/** NINTENDO64（A・B・Z・L・R・C ボタン 4 つ。十字キーは 3D スティックとして使う） */
+class N64Machine implements Machine {
+  readonly system = 'n64';
+  readonly fps: number;
+  readonly crop = 0;
+  readonly colorable = false;
+  readonly aspect: [number, number] = [320, 240];
+  n64: N64;
+  private pad = 0;
+  private spread = 1;
+
+  constructor(private readonly data: Uint8Array) {
+    this.n64 = new N64(data);
+    this.fps = this.n64.fps;
+  }
+  setPalette() {}
+  get width() {
+    return this.n64.outW;
+  }
+  get height() {
+    return this.n64.outH;
+  }
+  get frameBuffer() {
+    return this.n64.frameBuffer;
+  }
+  runFrame() {
+    this.n64.runFrame();
+  }
+  setButtons(b: number) {
+    this.pad = b;
+    let p = 0;
+    if (b & BUTTON.A) p |= N64PAD.A;
+    if (b & BUTTON.B) p |= N64PAD.B;
+    if (b & BUTTON.L2) p |= N64PAD.Z;
+    if (b & BUTTON.START) p |= N64PAD.START;
+    if (b & BUTTON.L) p |= N64PAD.L;
+    if (b & BUTTON.R) p |= N64PAD.R;
+    if (b & BUTTON.EX_UP) p |= N64PAD.CUP;
+    if (b & BUTTON.EX_DOWN) p |= N64PAD.CDOWN;
+    if (b & BUTTON.EX_LEFT) p |= N64PAD.CLEFT;
+    if (b & BUTTON.EX_RIGHT) p |= N64PAD.CRIGHT;
+    const n = this.n64;
+    n.buttons = p;
+    // 十字キー → 3D スティック（ななめは少し弱めて、丸く動くように）
+    let x = (b & BUTTON.RIGHT ? 1 : 0) - (b & BUTTON.LEFT ? 1 : 0);
+    let y = (b & BUTTON.UP ? 1 : 0) - (b & BUTTON.DOWN ? 1 : 0);
+    const k = x && y ? 57 : 80;
+    x *= k;
+    y *= k;
+    n.stickX = x;
+    n.stickY = y;
+  }
+  takeSamples() {
+    return this.n64.takeSamples();
+  }
+  setAudio(rate: number, adjust: number) {
+    this.n64.sampleRate = rate;
+    this.n64.rateAdjust = adjust;
+  }
+  setStereo(spread: number) {
+    this.spread = spread;
+    this.n64.spread = spread;
+  }
+  reset() {
+    const old = this.n64;
+    const next = new N64(this.data);
+    next.save.set(old.save);
+    next.sampleRate = old.sampleRate;
+    next.rateAdjust = old.rateAdjust;
+    next.spread = this.spread;
+    this.n64 = next;
+    this.setButtons(this.pad);
+  }
+  get saveRam() {
+    return this.n64.save;
+  }
+  get saveDirty() {
+    return this.n64.saveDirty;
+  }
+  set saveDirty(v: boolean) {
+    this.n64.saveDirty = v;
+  }
+  afterSaveLoaded() {}
+  poke(a: number, v: number) {
+    const p = a & 0x1fffffff;
+    if (p < this.n64.ramSize) this.n64.ram8[p ^ 3] = v;
+  }
+  peek(a: number) {
+    const p = a & 0x1fffffff;
+    return p < this.n64.ramSize ? this.n64.ram8[p ^ 3] : 0;
+  }
+  setRomPatches() {}
+  private parts(): Record<string, object> {
+    const n = this.n64;
+    return { n64: n, cpu: n.cpu, rsp: n.rsp, rdp: n.rdp };
+  }
+  saveState() {
+    const n = this.n64;
+    const skip = new Set<unknown>([n, n.cpu, n.rsp, n.rdp, ...n.stateSkip(), ...n.cpu.stateSkip(), ...n.rsp.stateSkip(), ...n.rdp.stateSkip()]);
+    return captureState('n64', this.data.length, this.parts(), skip);
+  }
+  loadState(st: SaveState) {
+    applyState(st, 'n64', this.data.length, this.parts());
+    this.n64.render();
+    this.n64.saveDirty = true;
+    this.setButtons(this.pad);
   }
 }

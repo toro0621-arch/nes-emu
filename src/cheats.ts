@@ -159,6 +159,33 @@ function psxPar(code: string): CheatOp | null {
   return null;
 }
 
+/** NINTENDO64 のゲームシャーク（プロアクションリプレイ） */
+function n64Shark(code: string): CheatOp | null {
+  const m = code.match(/^([0-9A-F]{2})([0-9A-F]{6})\s?([0-9A-F]{4})$/);
+  if (!m) return null;
+  const addr = (0x80000000 | hex(m[2])) >>> 0;
+  const val = hex(m[3]);
+  // 64 は上位バイトが先なので、16 ビットは 2 バイトを入れ替えて書く
+  const swap = ((val & 0xff) << 8) | (val >> 8);
+  switch (m[1]) {
+    case '80':
+    case 'A0':
+      return { kind: 'write', addr, val: val & 0xff, size: 1 };
+    case '81':
+    case 'A1':
+      return { kind: 'write', addr, val: swap, size: 2 };
+    case 'D0':
+      return { kind: 'if', addr, val: val & 0xff, size: 1, eq: true };
+    case 'D1':
+      return { kind: 'if', addr, val: swap, size: 2, eq: true };
+    case 'D2':
+      return { kind: 'if', addr, val: val & 0xff, size: 1, eq: false };
+    case 'D3':
+      return { kind: 'if', addr, val: swap, size: 2, eq: false };
+  }
+  return null;
+}
+
 const PARSERS: Record<System, ((c: string) => CheatOp | null)[]> = {
   nes: [nesGenie, raw],
   gb: [gbShark, gbGenie, raw],
@@ -166,6 +193,7 @@ const PARSERS: Record<System, ((c: string) => CheatOp | null)[]> = {
   gba: [gbaCb, raw],
   psx: [psxPar, raw],
   ws: [raw],
+  n64: [n64Shark, raw],
 };
 
 /** 本体ごとに使えるコードの書き方（メニューの説明） */
@@ -176,6 +204,7 @@ export const CHEAT_HELP: Record<System, string> = {
   gba: 'コードブレイカー（32000000 00FF など。暗号になっているものは使えません）、または「アドレス:値」',
   psx: 'プロアクションリプレイ（800A1234 03E7 など。80・30・D0・D1・E0・E1 で始まるもの）',
   ws: '「アドレス:値」（1234:63 など）',
+  n64: 'ゲームシャーク（8033B21E 0008 など。80・81・D0・D1・D2・D3 で始まるもの）',
 };
 
 /** 何行でも、1 行に 1 つずつ。読めないものがあれば、その行を例外のメッセージにする */

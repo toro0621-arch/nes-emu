@@ -106,8 +106,8 @@ function bindScreen(m: Machine): void {
 function setButtonLabels(system: System): void {
   const ps = system === 'psx';
   const labels: Record<string, string> = ps
-    ? { A: '○', B: '✕', X: '△', Y: '□', L: 'L1', R: 'R1' }
-    : { A: 'A', B: 'B', X: 'X', Y: 'Y', L: 'L', R: 'R' };
+    ? { A: '○', B: '✕', X: '△', Y: '□', L: 'L1', R: 'R1', L2: 'L2' }
+    : { A: 'A', B: 'B', X: 'X', Y: 'Y', L: 'L', R: 'R', L2: system === 'n64' ? 'Z' : 'L2' };
   for (const [btn, text] of Object.entries(labels)) {
     const el = document.querySelector<HTMLElement>(`#pad [data-btn="${btn}"]`);
     if (el) el.textContent = text;
@@ -115,7 +115,7 @@ function setButtonLabels(system: System): void {
 }
 
 /** ファイル名から拡張子を取る */
-const baseName = (name: string) => name.replace(/\.(nes|gbc?|gba|wsc?|sfc|smc|exe)$/i, '');
+const baseName = (name: string) => name.replace(/\.(nes|gbc?|gba|wsc?|sfc|smc|exe|z64|n64|v64)$/i, '');
 
 // ---- 音 ----
 const audio = new AudioOutput();
@@ -989,6 +989,7 @@ const FOLDERS: { system: System; name: string; icon: string }[] = [
   { system: 'gba', name: 'ゲームボーイアドバンス', icon: '🟣' },
   { system: 'snes', name: 'スーパーファミコン', icon: '🌈' },
   { system: 'psx', name: 'プレイステーション', icon: '💿' },
+  { system: 'n64', name: 'NINTENDO64', icon: '🕹️' },
 ];
 /** 開いているフォルダ（null ならフォルダの一覧） */
 let openFolder: System | null = null;
@@ -1090,7 +1091,7 @@ class Rewind {
     if (++this.counter < 10) return;
     this.counter = 0;
     const st = m.saveState();
-    if (this.buf.length === 0) this.cap = Math.max(10, Math.min(60, Math.floor((24 << 20) / Math.max(1, stateBytes(st)))));
+    if (this.buf.length === 0) this.cap = Math.max(4, Math.min(60, Math.floor((40 << 20) / Math.max(1, stateBytes(st)))));
     this.buf.push(st);
     if (this.buf.length > this.cap) this.buf.shift();
   }

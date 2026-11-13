@@ -837,3 +837,74 @@ html[data-system='psx'] #ab .round.pressed {
 .cheat-form .btn {
   justify-self: start;
 }
+
+/* ---- NINTENDO64：A・B（X・Y は出さない）、C ボタン 4 つ（黄色）、上に Z・L・R ---- */
+html[data-system='n64'] #ypad {
+  display: block;
+}
+html[data-system='n64'] .round.small {
+  --ylabel: 'C';
+  background: #d9a514;
+  box-shadow: 0 2px 0 #8a6a0c;
+  color: #2a2000;
+}
+/* C ボタンが R にかぶらないように、C と A・B を少し下げる */
+html[data-system='n64'] #ypad {
+  top: calc(50% - var(--unit) * 2.15);
+}
+html[data-system='n64'] #ab {
+  top: calc(50% + var(--unit) * 0.35);
+}
+html.landscape[data-system='n64'] #ypad {
+  top: calc(58% - var(--unit) * 2.9);
+}
+html.landscape[data-system='n64'] #ab {
+  top: calc(58% - var(--unit) * 0.35);
+}
+html[data-system='n64'] #ab [data-btn='A'] {
+  background: #3a62d0;
+  box-shadow: 0 3px 0 #23408f;
+}
+html[data-system='n64'] #ab [data-btn='B'] {
+  background: #2e9d57;
+  box-shadow: 0 3px 0 #1c6a39;
+}
+html[data-system='n64'] [data-btn='SELECT'] {
+  visibility: hidden;
+}
+html[data-system='n64'] #lr {
+  display: block;
+}
+html[data-system='n64'] #pad {
+  min-height: calc(var(--unit) * 5.6);
+}
+html[data-system='n64'] .shoulder[data-btn='L2'] {
+  display: flex;
+}
+html[data-system='n64'] .shoulder {
+  width: calc(var(--unit) * 1.5);
+}
+html[data-system='n64'] .shoulder[data-btn='L2'] {
+  left: calc(var(--unit) * 0.3);
+}
+html[data-system='n64'] .shoulder[data-btn='L'] {
+  left: calc(var(--unit) * 2);
+}
+html[data-system='n64'] .shoulder[data-btn='R'] {
+  right: calc(var(--unit) * 0.75);
+}
+html[data-system='n64'] .shoulder[data-btn='R2'] {
+  display: none;
+}
+html.landscape[data-system='n64'] .shoulder[data-btn='L2'] {
+  left: calc(var(--side) / 2 - var(--unit) * 1.6);
+}
+html.landscape[data-system='n64'] .shoulder[data-btn='L'] {
+  left: calc(var(--side) / 2 + var(--unit) * 0.1);
+}
+html.landscape[data-system='n64'] .shoulder[data-btn='R'] {
+  right: calc((var(--side) - var(--unit) * 1.5) / 2);
+}
+html.landscape[data-system='n64'] .shoulder[data-btn='R'] {
+  top: calc(var(--unit) * 0.5);
+}
