@@ -776,6 +776,23 @@ export class Rdp {
         if (z >= 0 && lo & 0x20 && zAddr < n.ramSize) n.ram16[(zAddr >> 1) ^ 1] = zEncode(z);
         return;
       }
+      if (this.ciSize === 2) {
+        // 16 ビットの画面に、ふつうの半透明で重ねる（いちばん多い場合なので、関数を呼ばずにここで）
+        const a = this.ciAddr + i * 2;
+        if (a < n.ramSize) {
+          const v = n.ram16[(a >> 1) ^ 1];
+          const mr = (v >> 11) & 31;
+          const mg = (v >> 6) & 31;
+          const mb = (v >> 1) & 31;
+          const B = 255 - alpha;
+          const r = ((comb[0] * alpha + ((mr << 3) | (mr >> 2)) * B + 127) / 255) | 0;
+          const g = ((comb[1] * alpha + ((mg << 3) | (mg >> 2)) * B + 127) / 255) | 0;
+          const b = ((comb[2] * alpha + ((mb << 3) | (mb >> 2)) * B + 127) / 255) | 0;
+          n.ram16[(a >> 1) ^ 1] = ((r >> 3) << 11) | ((g >> 3) << 6) | ((b >> 3) << 1) | 1;
+        }
+        if (z >= 0 && lo & 0x20 && zAddr < n.ramSize) n.ram16[(zAddr >> 1) ^ 1] = zEncode(z);
+        return;
+      }
     }
     const pix = this.pix;
     pix[0] = comb[0];
@@ -858,10 +875,27 @@ export class Rdp {
     this.texel1.fill(0);
     const two = cycle === 1;
     const z = this.omLo & 4 ? this.primZ << 3 : -1;
+    // テクスチャもシェードもないので、合成した色は四角形のどこでも同じ（1 回だけ計算する）
+    if (two) this.combine(0);
+    this.combine(1);
+    const comb = this.comb;
+    const r = comb[0];
+    const g = comb[1];
+    const b = comb[2];
+    const a = comb[3];
+    const lo = this.omLo;
+    const fast = !two && (lo & 0x4000) !== 0 && this.stdBlend && !(lo & 0x2000) && (z < 0 || !(lo & 0x30));
+    if (fast && a === 0) return;
     for (let y = y0; y < y1; y++)
       for (let x = x0; x < x1; x++) {
-        if (two) this.combine(0);
-        this.combine(1);
+        if (fast && a === 255) {
+          this.writeFb(y * this.ciWidth + x, r, g, b);
+          continue;
+        }
+        comb[0] = r;
+        comb[1] = g;
+        comb[2] = b;
+        comb[3] = a;
         this.plot(x, y, z, this.primDz);
       }
   }

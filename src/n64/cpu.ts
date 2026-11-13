@@ -1443,7 +1443,7 @@ export class Vr4300 {
     this.exception(EXC_FPE);
   }
 
-  private setW(fd: number, x: number, mode: number): void {
+  setW(fd: number, x: number, mode: number): void {
     const v = this.roundTo(x, mode);
     if (!(v >= -2147483648 && v <= 2147483647)) return this.fpUnimplemented();
     this.fi[this.fidx(fd)] = v;
@@ -1530,7 +1530,7 @@ export class Vr4300 {
     this.exception(EXC_RI);
   }
 
-  private fcmp(op: number, a: number, b: number): void {
+  fcmp(op: number, a: number, b: number): void {
     const un = a !== a || b !== b;
     const f = op & 15;
     let c = false;

@@ -8,6 +8,8 @@ import { CYCLES_PER_OP, type Vr4300 } from './cpu';
 type Block = (c: Vr4300) => void;
 
 const MAX_OPS = 64;
+/** 1 つの関数にまとめる範囲（2 の何乗バイトか）。大きすぎると関数が大きくなって速くならない */
+const REGION = 8;
 
 /** その場で JavaScript にできる SPECIAL の命令 */
 const SIMPLE_FUNCT = new Set([
@@ -22,8 +24,10 @@ const KSEG = 0x80000000 | 0;
 export class Jit {
   /** 4 バイトごとの、そこから始まるブロック（KSEG0 と KSEG1 は同じ物理アドレスなので同じもの） */
   blocks: (Block | null)[];
-  /** ページ（4KB）ごとに、そこから作ったブロックの開始アドレス */
-  private pageBlocks = new Map<number, number[]>();
+  /** ページ（4KB）ごとに、そこから作ったブロックの中身（ワードの番号 → JavaScript） */
+  private pageSrc = new Map<number, Map<number, string>>();
+  /** ページごとの書き換えの回数（関数を作ったあとに書き換えられたら、その関数はすぐ抜ける） */
+  pageGen: Int32Array;
   /** プログラムを関数にしたページの印（書き込まれたら捨てる） */
   codePages: Uint8Array;
   /** 関数にした命令のワードの印（ここに書き込まれたら、そのページの関数を捨てる） */
@@ -40,6 +44,7 @@ export class Jit {
     ramSize: number,
   ) {
     this.codePages = new Uint8Array(ramSize >> 12);
+    this.pageGen = new Int32Array(ramSize >> 12);
     this.codeWords = new Uint8Array(ramSize >> 2);
     this.blocks = new Array<Block | null>(ramSize >> 2).fill(null);
     try {
@@ -52,18 +57,59 @@ export class Jit {
   get(pc: number): Block | null {
     if ((pc & RAM_MASK) !== KSEG) return null;
     const i = (pc & 0x7fffff) >> 2;
-    let b = this.blocks[i];
+    const b = this.blocks[i];
     if (b !== null) return b;
-    b = this.compile(pc);
-    if (!b) return null;
-    this.blocks[i] = b;
+    const body = this.compile(pc);
+    if (body === null) return null;
     this.codeWords.fill(1, i, Math.min(this.codeWords.length, i + this.lastLen));
     const page = (pc & 0x7fffff) >> 12;
     this.codePages[page] = 1;
-    const list = this.pageBlocks.get(page);
-    if (list) list.push(pc);
-    else this.pageBlocks.set(page, [pc]);
-    return b;
+    const region = (pc & 0x7fffff) >> REGION;
+    let src = this.pageSrc.get(region);
+    if (!src) {
+      src = new Map();
+      this.pageSrc.set(region, src);
+    }
+    src.set(i, body);
+    // 近くのブロックをまとめて 1 つの関数にし直す（関数の数が多いと、呼ぶたびに遅くなるため）
+    const fn = this.buildPage(page, region, src);
+    if (!fn) return null;
+    for (const k of src.keys()) this.blocks[k] = fn;
+    return fn;
+  }
+
+  /** ページの中のブロックを、switch で行き来する 1 つの関数にする */
+  private buildPage(page: number, region: number, src: Map<number, string>): Block | null {
+    const c = this.cpu;
+    const gen = this.pageGen[page];
+    const cases: string[] = [];
+    for (const [k, body] of src) cases.push(`case ${k}:{c.aborted=false;${body}}break;`);
+    const code =
+      'return function(c){const b=c.bus;let a=0,v=0,t=0;for(;;){switch((c.pc&0x7fffff)>>2){' +
+      cases.join('\n') +
+      '\ndefault:return;}lo[0]=0;hi[0]=0;' +
+      `if(c.aborted||c.branched||c.intReady||b.cycles>=b.stopAt||pg[${page}]!==${gen})return;` +
+      `const p=c.pc;if((p&${RAM_MASK})!==${KSEG}||((p&0x7fffff)>>${REGION})!==${region})return;}}`;
+    try {
+      return new Function('lo', 'hi', 'ram8', 'ram16', 'ram32', 'cp', 'mulHi', 'dsh', 'f32', 'f64', 'fi', 'pg', code)(
+        c.lo,
+        c.hi,
+        c.bus.ram8,
+        c.bus.ram16,
+        c.bus.ram32,
+        this.codeWords,
+        mulHi32,
+        dshift,
+        c.f32,
+        c.f64,
+        c.fi,
+        this.pageGen,
+      ) as Block;
+    } catch (e) {
+      console.error(e);
+      this.ok = false;
+      return null;
+    }
   }
 
   /** 物理アドレス p のページの関数を捨てる */
@@ -71,14 +117,16 @@ export class Jit {
     const page = p >> 12;
     if (!this.codePages[page]) return;
     this.codePages[page] = 0;
-    const list = this.pageBlocks.get(page);
-    if (list) {
-      for (const k of list) this.blocks[(k & 0x7fffff) >> 2] = null;
-      this.codeWords.fill(0, page << 10, (page + 1) << 10);
-      // ブロックはページをまたがないが、遅延スロットのぶん次のページの最初のワードに印があるかもしれない
-      if ((page + 1) << 10 < this.codeWords.length) this.codeWords[(page + 1) << 10] = 0;
-      this.pageBlocks.delete(page);
+    this.pageGen[page]++;
+    for (let r = (page << 12) >> REGION; r < ((page + 1) << 12) >> REGION; r++) {
+      const src = this.pageSrc.get(r);
+      if (!src) continue;
+      for (const k of src.keys()) this.blocks[k] = null;
+      this.pageSrc.delete(r);
     }
+    this.codeWords.fill(0, page << 10, (page + 1) << 10);
+    // ブロックはページをまたがないが、遅延スロットのぶん次のページの最初のワードに印があるかもしれない
+    if ((page + 1) << 10 < this.codeWords.length) this.codeWords[(page + 1) << 10] = 0;
   }
 
   invalidateRange(p: number, len: number): void {
@@ -88,13 +136,14 @@ export class Jit {
 
   clear(): void {
     this.blocks.fill(null);
-    this.pageBlocks.clear();
+    this.pageSrc.clear();
+    this.pageGen.fill(0);
     this.codePages.fill(0);
     this.codeWords.fill(0);
   }
 
   // ---- 書き換え ----
-  private compile(pc: number): Block | null {
+  private compile(pc: number): string | null {
     if (!this.ok || (pc & RAM_MASK) !== KSEG || pc & 3) return null;
     const c = this.cpu;
     const ram32 = c.bus.ram32;
@@ -135,7 +184,9 @@ export class Jit {
         ended = true;
         break;
       }
-      lines.push(cyc(kind === 'simple' ? this.simple(op, addr, false) : this.generic(op, addr, false), n + 1));
+      const code =
+        kind === 'simple' ? this.simple(op, addr, false) : (this.fpu(op, addr, c.status & 0x24000000) ?? this.generic(op, addr, false));
+      lines.push(cyc(code, n + 1));
       n++;
       addr += 4;
       if (addr >= pageEnd) break;
@@ -144,24 +195,10 @@ export class Jit {
     if (n === 0) return null;
     this.lastLen = Math.max(n, ((addr - pc) >> 2) + 1);
     if (!ended) lines.push(`b.cycles+=${n * CYCLES_PER_OP};c.pc=${addr | 0};c.nextPc=${(addr + 4) | 0};`);
-    const body = 'return function(c){const b=c.bus;c.aborted=false;let a=0,v=0,t=0;' + lines.join('\n') + '}';
+    // ページの関数の中では、ブロックを抜ける return は switch を抜ける break にする
+    const body = lines.join('\n').replace(/return;/g, 'break;');
     if (this.debugSrc) this.debugSrc.set(pc, body);
-    try {
-      return new Function('lo', 'hi', 'ram8', 'ram16', 'ram32', 'cp', 'mulHi', 'dsh', body)(
-        c.lo,
-        c.hi,
-        c.bus.ram8,
-        c.bus.ram16,
-        c.bus.ram32,
-        this.codeWords,
-        mulHi32,
-        dshift,
-      ) as Block;
-    } catch (e) {
-      console.error(e);
-      this.ok = false;
-      return null;
-    }
+    return body;
   }
 
   /** simple：その場で書ける命令、generic：インタープリターを呼ぶ、branch：分岐、end：ここでブロックを終える */
@@ -219,6 +256,102 @@ export class Jit {
         return ((op >>> 21) & 31) === 8 ? 'end' : 'generic';
     }
     return 'generic';
+  }
+
+  /**
+   * 浮動小数点（COP1）のよく使う命令をその場で書く。書けないときは null（インタープリターで）。
+   * x：書いたときの Status の CU1・FR。実行するときに変わっていたら、インタープリターで実行する
+   */
+  private fpu(op: number, addr: number, x: number): string | null {
+    if (!(x & 0x20000000)) return null;
+    const fr = (x & 0x04000000) !== 0;
+    const ix = (r: number) => (fr ? r * 2 : (r & ~1) * 2 + (r & 1));
+    const dx = (r: number) => (fr ? r : r & ~1);
+    const dl = (r: number) => (fr ? r * 2 : (r & ~1) * 2);
+    const rs = (op >>> 21) & 31;
+    const rt = (op >>> 16) & 31;
+    const fs = (op >>> 11) & 31;
+    const fd = (op >>> 6) & 31;
+    const imm = (op << 16) >> 16;
+    const ea = `a=(lo[${rs}]+${imm})|0;`;
+    const fail = 'if(c.aborted)return;';
+    const pre = this.pre(addr, false);
+    let fast: string | null = null;
+    switch (op >>> 26) {
+      case 0x31: // LWC1
+        fast = ea + `if((a&${RAM_MASK | 3})===${KSEG})t=ram32[(a&0x7fffff)>>2];else{${pre}t=c.r32(a);${fail}}fi[${ix(rt)}]=t;`;
+        break;
+      case 0x39: // SWC1
+        fast =
+          ea +
+          `v=fi[${ix(rt)}];if((a&${RAM_MASK | 3})===${KSEG}){b.writes++;ram32[(a&0x7fffff)>>2]=v;if(cp[(a&0x7fffff)>>2])c.jit.invalidate(a&0x7fffff);}` +
+          `else{${pre}c.w32(a,v);${fail}}`;
+        break;
+      case 0x35: // LDC1
+        fast =
+          ea +
+          `if((a&${RAM_MASK | 7})===${KSEG}){v=ram32[(a&0x7fffff)>>2];t=ram32[((a&0x7fffff)>>2)+1];}` +
+          `else{${pre}if(a&7){c.addrError(a,false);return;}v=c.r32(a);${fail}t=c.r32(a+4);${fail}}` +
+          `fi[${dl(rt)}]=t;fi[${dl(rt) + 1}]=v;`;
+        break;
+      case 0x3d: // SDC1
+        fast =
+          ea +
+          `if((a&${RAM_MASK | 7})===${KSEG}){b.writes++;ram32[(a&0x7fffff)>>2]=fi[${dl(rt) + 1}];ram32[((a&0x7fffff)>>2)+1]=fi[${dl(rt)}];if(cp[(a&0x7fffff)>>2]|cp[((a&0x7fffff)>>2)+1])c.jit.invalidate(a&0x7fffff);}` +
+          `else{${pre}if(a&7){c.addrError(a,true);return;}c.w32(a,fi[${dl(rt) + 1}]);${fail}c.w32(a+4,fi[${dl(rt)}]);${fail}}`;
+        break;
+      case 0x11: {
+        const f = op & 63;
+        if (rs === 0x00) fast = rt ? `v=fi[${ix(fs)}];lo[${rt}]=v;hi[${rt}]=v>>31;` : '';
+        else if (rs === 0x04) fast = `fi[${ix(fs)}]=lo[${rt}];`;
+        else if (rs === 0x10 || rs === 0x11) {
+          const S = rs === 0x10;
+          const get = (r: number) => (S ? `f32[${ix(r)}]` : `f64[${dx(r)}]`);
+          const set = (v: string) => (S ? `f32[${ix(fd)}]=${v};` : `f64[${dx(fd)}]=${v};`);
+          switch (f) {
+            case 0x00:
+              fast = set(`${get(fs)}+${get(rt)}`);
+              break;
+            case 0x01:
+              fast = set(`${get(fs)}-${get(rt)}`);
+              break;
+            case 0x02:
+              fast = set(`${get(fs)}*${get(rt)}`);
+              break;
+            case 0x03:
+              fast = set(`${get(fs)}/${get(rt)}`);
+              break;
+            case 0x04:
+              fast = set(`Math.sqrt(${get(fs)})`);
+              break;
+            case 0x05:
+              fast = set(`Math.abs(${get(fs)})`);
+              break;
+            case 0x06:
+              fast = S ? `fi[${ix(fd)}]=fi[${ix(fs)}];` : `fi[${dl(fd)}]=fi[${dl(fs)}];fi[${dl(fd) + 1}]=fi[${dl(fs) + 1}];`;
+              break;
+            case 0x07:
+              fast = set(`-${get(fs)}`);
+              break;
+            case 0x20:
+              if (!S) fast = `f32[${ix(fd)}]=f64[${dx(fs)}];`;
+              break;
+            case 0x21:
+              if (S) fast = `f64[${dx(fd)}]=f32[${ix(fs)}];`;
+              break;
+            default:
+              if (f >= 0x30) fast = `c.fcmp(${op | 0},${get(fs)},${get(rt)});`;
+              else if (f === 0x0d || f === 0x24) fast = `${pre}c.setW(${fd},${get(fs)},${f === 0x0d ? 1 : 'c.fcr31&3'});${fail}`;
+          }
+        } else if (rs === 0x14) {
+          if ((op & 63) === 0x20) fast = `f32[${ix(fd)}]=fi[${ix(fs)}];`;
+          else if ((op & 63) === 0x21) fast = `f64[${dx(fd)}]=fi[${ix(fs)}];`;
+        }
+        break;
+      }
+    }
+    if (fast === null) return null;
+    return `if((c.status&${0x24000000})===${x}){${fast}}else{${this.generic(op, addr, false)}}`;
   }
 
   /** インタープリターで 1 命令（end なら、そのあとブロックを終える） */
