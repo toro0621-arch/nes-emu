@@ -2,6 +2,7 @@
 // コントローラーとセーブ（SI・PIF）、絵と音の計算機（RSP・RDP）をまとめて、1 フレームずつ進める
 
 import { CYCLES_PER_OP, Vr4300, type N64Bus } from './cpu';
+import { Jit } from './jit';
 import { Rdp } from './rdp';
 import { Rsp } from './rsp';
 
@@ -155,14 +156,17 @@ export class N64 implements N64Bus {
   sampleLength = 0;
   private resample = 0;
   frame = 0;
+  /** このフレームは絵を描かない（重いときに間引く） */
+  skipDraw = false;
 
-  constructor(rom: Uint8Array) {
+  constructor(rom: Uint8Array, useJit = true) {
     const r = normalizeRom(rom);
     // 2 のべき乗に広げなくてよい。4 バイト単位で持つ
     this.rom8 = new Uint8Array(new ArrayBuffer(r.length));
     this.rom8.set(r);
     this.rom32 = new Int32Array(this.rom8.buffer);
     this.cpu = new Vr4300(this);
+    if (useJit) this.cpu.jit = new Jit(this.cpu, this.ramSize);
     this.rdp = new Rdp(this);
     this.rsp = new Rsp(this);
     const id = String.fromCharCode(this.romByte(0x3c), this.romByte(0x3d));
@@ -273,7 +277,8 @@ export class N64 implements N64Bus {
       const i = p - 0x10000000;
       return i < this.rom8.length ? this.rom32[i >> 2] : 0;
     }
-    this.volatileRead = true;
+    // 入出力のレジスタは「出来事」のときにしか変わらない（出来事の時刻で CPU を止めている）ので、
+    // それを読み続けるだけのループも飛ばしてよい。時間とともに変わる AI の残りの長さだけは別
     if (p >= 0x04000000 && p < 0x04002000) return this.spMem32[(p & 0x1fff) >> 2];
     switch (p >>> 20) {
       case 0x03f:
@@ -299,6 +304,7 @@ export class N64 implements N64Bus {
         return this.vi[r] | 0;
       }
       case 0x045:
+        this.volatileRead = true;
         switch (p & 0x1c) {
           case 4:
             return this.aiRemaining();
@@ -349,6 +355,7 @@ export class N64 implements N64Bus {
     }
     if (p >= 0x04000000 && p < 0x04002000) {
       this.spMem32[(p & 0x1fff) >> 2] = v;
+      if (p & 0x1000) this.rsp.jit?.invalidate(p & 0xffc, 4);
       return;
     }
     switch (p >>> 20) {
@@ -489,6 +496,7 @@ export class N64 implements N64Bus {
     }
     if (p >= 0x04000000 && p < 0x04002000) {
       this.spMem8[(p & 0x1fff) ^ 3] = v;
+      if (p & 0x1000) this.rsp.jit?.invalidate(p & 0xffc, 4);
       return;
     }
     this.write32(p & ~3, v << ((3 - (p & 3)) * 8));
@@ -523,6 +531,7 @@ export class N64 implements N64Bus {
     } else if (cart >= 0x08000000 && cart < 0x08020000) {
       this.saveWrite(cart - 0x08000000, dram, len);
     }
+    if (toRam) this.cpu.jit?.invalidateRange(dram, len);
     this.pi[0] = (dram + len + 7) & 0xfffff8;
     this.pi[1] = (cart + len + 1) & ~1;
     this.writes++;
@@ -602,7 +611,10 @@ export class N64 implements N64Bus {
   private siDma(toRam: boolean): void {
     const a = this.siAddr & 0xfffffc;
     const ram = this.ram8;
-    if (toRam) for (let i = 0; i < 64; i++) ram[(a + i) ^ 3] = this.pifRam[i];
+    if (toRam) {
+      for (let i = 0; i < 64; i++) ram[(a + i) ^ 3] = this.pifRam[i];
+      this.cpu.jit?.invalidateRange(a, 64);
+    }
     else {
       for (let i = 0; i < 64; i++) this.pifRam[i] = ram[(a + i) ^ 3];
       this.pifControl();
@@ -801,7 +813,7 @@ export class N64 implements N64Bus {
       this.viLine = (l & ~1) | this.viField;
       if ((l & ~1) === (intr & ~1) && !(l & 1)) {
         this.raise(INT_VI);
-        this.render();
+        if (!this.skipDraw) this.render();
       }
       const end = start + Math.floor(((l + 1) * frameCycles) / lines);
       while (this.cycles < end) {

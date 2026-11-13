@@ -99,7 +99,9 @@ export class Rdp {
   private noise = new Int32Array(4);
   private tmpC = new Int32Array(4);
 
-  constructor(private n64: N64) {}
+  constructor(private n64: N64) {
+    this.decodeCombine();
+  }
 
   readReg(r: number): number {
     switch (r) {
@@ -178,6 +180,7 @@ export class Rdp {
       case 0x2c:
         this.k4 = (w1 >> 9) & 0x1ff;
         this.k5 = w1 & 0x1ff;
+        this.k5Arr.fill(this.k5);
         return;
       case 0x2d:
         this.scX0 = ((w0 >> 12) & 0xfff) >> 2;
@@ -192,6 +195,7 @@ export class Rdp {
       case 0x2f:
         this.omHi = w0;
         this.omLo = w1;
+        this.decodeCombine();
         return;
       case 0x30:
         return this.loadTlut();
@@ -237,6 +241,7 @@ export class Rdp {
         return;
       case 0x3a:
         this.primLod = w0 & 0xff;
+        this.lodArr.fill(this.primLod);
         setColor(this.prim, w1);
         return;
       case 0x3b:
@@ -245,6 +250,7 @@ export class Rdp {
       case 0x3c:
         this.combHi = w0;
         this.combLo = w1;
+        this.decodeCombine();
         return;
       case 0x3d:
         this.tiFormat = (w0 >> 21) & 7;
@@ -465,6 +471,20 @@ export class Rdp {
   }
 
   // ---- 色の合成 ----
+  /** 色の合成の入力（設定が変わったときに、どの値を使うかを決めておく） */
+  private lodArr = new Int32Array(4);
+  private k5Arr = new Int32Array(4);
+  private cA: Int32Array[][] = [[], []];
+  private cB: Int32Array[][] = [[], []];
+  private cC: Int32Array[][] = [[], []];
+  private cD: Int32Array[][] = [[], []];
+  /** C が透明度（スカラー）のとき true */
+  private cCa = [false, false];
+  private aA: Int32Array[] = [];
+  private aB: Int32Array[] = [];
+  private aC: Int32Array[] = [];
+  private aD: Int32Array[] = [];
+
   private rgbIn(sel: number, kind: number): Int32Array {
     switch (sel) {
       case 0:
@@ -487,125 +507,142 @@ export class Rdp {
     return this.zero;
   }
 
-  /** (A − B) × C + D を 1 回 */
-  private combine(cycle: number): void {
+  private alphaArr(sel: number, mul: boolean): Int32Array {
+    switch (sel) {
+      case 0:
+        // 掛ける側の 0 は LOD の割合。LOD を使わないときは「全部」として扱う（実機のテストの絵と合わせる）
+        return mul ? this.one : this.comb;
+      case 1:
+        return this.texel0;
+      case 2:
+        return this.texel1;
+      case 3:
+        return this.prim;
+      case 4:
+        return this.shade;
+      case 5:
+        return this.env;
+      case 6:
+        return mul ? this.lodArr : this.one;
+    }
+    return this.zero;
+  }
+
+  /** 合成の設定を読み解く（SetCombine のとき・どこでもセーブを読んだあと） */
+  decodeCombine(): void {
     const hi = this.combHi;
     const lo = this.combLo;
-    let a: number;
-    let b: number;
-    let c: number;
-    let d: number;
-    let aa: number;
-    let ab: number;
-    let ac: number;
-    let ad: number;
-    if (cycle === 0) {
-      a = (hi >> 20) & 15;
-      c = (hi >> 15) & 31;
-      aa = (hi >> 12) & 7;
-      ac = (hi >> 9) & 7;
-      b = (lo >>> 28) & 15;
-      d = (lo >> 15) & 7;
-      ab = (lo >> 12) & 7;
-      ad = (lo >> 9) & 7;
-    } else {
-      a = (hi >> 5) & 15;
-      c = hi & 31;
-      b = (lo >> 24) & 15;
-      aa = (lo >> 21) & 7;
-      ac = (lo >> 18) & 7;
-      d = (lo >> 6) & 7;
-      ab = (lo >> 3) & 7;
-      ad = lo & 7;
+    for (let cycle = 0; cycle < 2; cycle++) {
+      let a: number, b: number, c: number, d: number, aa: number, ab: number, ac: number, ad: number;
+      if (cycle === 0) {
+        a = (hi >> 20) & 15;
+        c = (hi >> 15) & 31;
+        aa = (hi >> 12) & 7;
+        ac = (hi >> 9) & 7;
+        b = (lo >>> 28) & 15;
+        d = (lo >> 15) & 7;
+        ab = (lo >> 12) & 7;
+        ad = (lo >> 9) & 7;
+      } else {
+        a = (hi >> 5) & 15;
+        c = hi & 31;
+        b = (lo >> 24) & 15;
+        aa = (lo >> 21) & 7;
+        ac = (lo >> 18) & 7;
+        d = (lo >> 6) & 7;
+        ab = (lo >> 3) & 7;
+        ad = lo & 7;
+      }
+      const A = this.rgbIn(a, 0);
+      const B = this.rgbIn(b, 1);
+      const D = this.rgbIn(d, 3);
+      let C: Int32Array;
+      let alphaC = false;
+      if (c < 6) C = this.rgbIn(c, 2);
+      else {
+        alphaC = true;
+        switch (c) {
+          case 7:
+            C = this.comb;
+            break;
+          case 8:
+            C = this.texel0;
+            break;
+          case 9:
+            C = this.texel1;
+            break;
+          case 10:
+            C = this.prim;
+            break;
+          case 11:
+            C = this.shade;
+            break;
+          case 12:
+            C = this.env;
+            break;
+          case 14:
+            C = this.lodArr;
+            break;
+          case 15:
+            C = this.k5Arr;
+            break;
+          default:
+            C = this.zero;
+        }
+      }
+      this.cA[cycle] = [A];
+      this.cB[cycle] = [B];
+      this.cC[cycle] = [C];
+      this.cD[cycle] = [D];
+      this.cCa[cycle] = alphaC;
+      this.aA[cycle] = this.alphaArr(aa, false);
+      this.aB[cycle] = this.alphaArr(ab, false);
+      this.aC[cycle] = this.alphaArr(ac, true);
+      this.aD[cycle] = this.alphaArr(ad, false);
+      // (A − B) × C が 0 になる設定（いちばんよく使う「テクスチャそのまま」など）は D だけ
+      this.passD[cycle] = (C === this.zero || A === B) && (this.aC[cycle] === this.zero || this.aA[cycle] === this.aB[cycle]);
     }
-    const A = this.rgbIn(a, 0);
-    const B = this.rgbIn(b, 1);
-    const D = this.rgbIn(d, 3);
+    // 重ね合わせの設定：ふつうの半透明（P×A + M×(1−A)）か
+    const om = this.omLo;
+    this.stdBlend = ((om >>> 30) & 3) === 0 && ((om >>> 26) & 3) === 0 && ((om >>> 22) & 3) === 1 && ((om >>> 18) & 3) === 0;
+  }
+  private passD = [false, false];
+  /** 1 サイクルで、ふつうの半透明の重ね合わせ */
+  private stdBlend = false;
+
+  /** (A − B) × C + D を 1 回 */
+  private combine(cycle: number): void {
+    if (this.passD[cycle]) {
+      const D = this.cD[cycle][0];
+      const o = this.comb;
+      o[0] = D[0];
+      o[1] = D[1];
+      o[2] = D[2];
+      o[3] = this.aD[cycle][3];
+      return;
+    }
+    const A = this.cA[cycle][0];
+    const B = this.cB[cycle][0];
+    const C = this.cC[cycle][0];
+    const D = this.cD[cycle][0];
     let c0: number;
     let c1: number;
     let c2: number;
-    if (c < 6) {
-      const C = this.rgbIn(c, 2);
+    if (this.cCa[cycle]) c0 = c1 = c2 = C[3];
+    else {
       c0 = C[0];
       c1 = C[1];
       c2 = C[2];
-    } else {
-      let v = 0;
-      switch (c) {
-        case 7:
-          v = this.comb[3];
-          break;
-        case 8:
-          v = this.texel0[3];
-          break;
-        case 9:
-          v = this.texel1[3];
-          break;
-        case 10:
-          v = this.prim[3];
-          break;
-        case 11:
-          v = this.shade[3];
-          break;
-        case 12:
-          v = this.env[3];
-          break;
-        case 14:
-          v = this.primLod;
-          break;
-        case 15:
-          v = this.k5;
-          break;
-      }
-      c0 = c1 = c2 = v;
     }
-    const r = clamp8(((A[0] - B[0]) * c0 + (D[0] << 8) + 0x80) >> 8);
-    const g = clamp8(((A[1] - B[1]) * c1 + (D[1] << 8) + 0x80) >> 8);
-    const bl = clamp8(((A[2] - B[2]) * c2 + (D[2] << 8) + 0x80) >> 8);
-    const al = clamp8(((this.alphaIn(aa) - this.alphaIn(ab)) * this.alphaMul(ac) + (this.alphaIn(ad) << 8) + 0x80) >> 8);
+    const r = ((A[0] - B[0]) * c0 + (D[0] << 8) + 0x80) >> 8;
+    const g = ((A[1] - B[1]) * c1 + (D[1] << 8) + 0x80) >> 8;
+    const bl = ((A[2] - B[2]) * c2 + (D[2] << 8) + 0x80) >> 8;
+    const al = ((this.aA[cycle][3] - this.aB[cycle][3]) * this.aC[cycle][3] + (this.aD[cycle][3] << 8) + 0x80) >> 8;
     const o = this.comb;
-    o[0] = r;
-    o[1] = g;
-    o[2] = bl;
-    o[3] = al;
-  }
-
-  private alphaIn(sel: number): number {
-    switch (sel) {
-      case 0:
-        return this.comb[3];
-      case 1:
-        return this.texel0[3];
-      case 2:
-        return this.texel1[3];
-      case 3:
-        return this.prim[3];
-      case 4:
-        return this.shade[3];
-      case 5:
-        return this.env[3];
-      case 6:
-        return 255;
-    }
-    return 0;
-  }
-
-  private alphaMul(sel: number): number {
-    switch (sel) {
-      case 1:
-        return this.texel0[3];
-      case 2:
-        return this.texel1[3];
-      case 3:
-        return this.prim[3];
-      case 4:
-        return this.shade[3];
-      case 5:
-        return this.env[3];
-      case 6:
-        return this.primLod;
-    }
-    return 0;
+    o[0] = r < 0 ? 0 : r > 255 ? 255 : r;
+    o[1] = g < 0 ? 0 : g > 255 ? 255 : g;
+    o[2] = bl < 0 ? 0 : bl > 255 ? 255 : bl;
+    o[3] = al < 0 ? 0 : al > 255 ? 255 : al;
   }
 
   // ---- 画面へ書く ----
@@ -731,6 +768,15 @@ export class Rdp {
     }
     const twoCycle = ((this.omHi >> 20) & 3) === 1;
     const force = (lo & 0x4000) !== 0;
+    if (force && !twoCycle && this.stdBlend && !(lo & 0x2000)) {
+      // ふつうの半透明：まったく透明なら何もしない、まったく不透明なら重ねずに書く
+      if (alpha === 0 && !(z >= 0 && lo & 0x20)) return;
+      if (alpha === 255) {
+        this.writeFb(i, comb[0], comb[1], comb[2]);
+        if (z >= 0 && lo & 0x20 && zAddr < n.ramSize) n.ram16[(zAddr >> 1) ^ 1] = zEncode(z);
+        return;
+      }
+    }
     const pix = this.pix;
     pix[0] = comb[0];
     pix[1] = comb[1];
@@ -762,6 +808,7 @@ export class Rdp {
 
   // ---- 四角形 ----
   private fillRect(): void {
+    if (this.n64.skipDraw) return;
     const w0 = this.w[0];
     const w1 = this.w[1];
     const cycle = (this.omHi >> 20) & 3;
@@ -820,6 +867,7 @@ export class Rdp {
   }
 
   private texRect(flip: boolean): void {
+    if (this.n64.skipDraw) return;
     const w = this.w;
     const cycle = (this.omHi >> 20) & 3;
     let x1 = ((w[0] >> 12) & 0xfff) >> 2;
@@ -880,6 +928,7 @@ export class Rdp {
 
   // ---- 三角形 ----
   private triangle(cmd: number): void {
+    if (this.n64.skipDraw) return;
     const w = this.w;
     const shadeOn = (cmd & 4) !== 0;
     const texOn = (cmd & 2) !== 0;
@@ -1050,7 +1099,7 @@ export class Rdp {
   }
 
   stateSkip(): unknown[] {
-    return [this.w, this.one, this.zero, this.tmpC, this.pix];
+    return [this.w, this.one, this.zero, this.tmpC, this.pix, this.cA, this.cB, this.cC, this.cD, this.aA, this.aB, this.aC, this.aD, this.cCa];
   }
 }
 

@@ -1078,20 +1078,27 @@ class Rewind {
   private buf: SaveState[] = [];
   private cap = 60;
   private counter = 0;
+  private every = 10;
   active = false;
   private popWait = 0;
 
   clear(): void {
     this.buf = [];
     this.counter = 0;
+    this.every = 10;
   }
 
   /** ふつうに 1 フレーム進めたあと */
   record(m: Machine): void {
-    if (++this.counter < 10) return;
+    if (++this.counter < this.every) return;
     this.counter = 0;
     const st = m.saveState();
-    if (this.buf.length === 0) this.cap = Math.max(4, Math.min(60, Math.floor((40 << 20) / Math.max(1, stateBytes(st)))));
+    if (this.buf.length === 0) {
+      const size = stateBytes(st);
+      this.cap = Math.max(4, Math.min(60, Math.floor((40 << 20) / Math.max(1, size))));
+      // 大きい本体（64 は 9MB くらい）は、覚える間隔をあけて軽くする
+      this.every = size > 4 << 20 ? 60 : 10;
+    }
     this.buf.push(st);
     if (this.buf.length > this.cap) this.buf.shift();
   }
@@ -1232,6 +1239,8 @@ function loop(now: number): void {
     // 本体ごとのフレームレート（ファミコン 60.1、ゲームボーイ 59.7、ワンダースワン 75.5）で進める
     const FRAME_MS = 1000 / machine.fps;
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);
+    // 絵を間引ける本体は、遅れているときは最後の 1 フレームだけ描く
+    const canSkip = !!machine.setSkip;
     let ran = false;
     // 半フレーム分たまったら 1 フレーム進める（60Hz 画面で毎回 1 フレームになるように）
     let rewound = false;
@@ -1247,6 +1256,7 @@ function loop(now: number): void {
       }
       machine.setButtons(touch.read() | keyboard.read());
       if (cheats.active && machine.poke) cheats.apply(machine as unknown as CheatTarget);
+      if (canSkip) machine.setSkip!(acc >= FRAME_MS * 1.5);
       machine.runFrame();
       rewind.record(machine);
       acc -= FRAME_MS;

@@ -2,6 +2,8 @@
 // レジスタは 64 ビットなので、上位 32 ビットと下位 32 ビットを別々の配列で持つ（JavaScript の数は 32 ビットの計算が速い）。
 // 浮動小数点（COP1）、TLB（仮想アドレスの変換表）、例外・割り込みまで入っている
 
+import type { Jit } from './jit';
+
 export interface N64Bus {
   /** 経過したクロック */
   cycles: number;
@@ -77,9 +79,9 @@ export class Vr4300 {
   mloH = 0;
   pc = 0;
   nextPc = 0;
-  private curPc = 0;
-  private inDelay = false;
-  private branched = false;
+  curPc = 0;
+  inDelay = false;
+  branched = false;
   llbit = false;
 
   // COP0
@@ -109,7 +111,7 @@ export class Vr4300 {
   /** 次に Count = Compare になる時刻 */
   timerAt = Infinity;
   /** 割り込みを受け付ける状態で、割り込みが来ている */
-  private intReady = false;
+  intReady = false;
   tlb = Array.from({ length: 32 }, () => new TlbEntry());
   // TLB の変換を 1 ページぶん覚えておく
   private tcPage = -1;
@@ -131,6 +133,9 @@ export class Vr4300 {
   private idlePc = -1;
   private idleSnap = new Int32Array(64);
   private idleWrites = 0;
+
+  /** 速く動かすための書き換え（使えなければ null） */
+  jit: Jit | null = null;
 
   constructor(public bus: N64Bus) {}
 
@@ -398,15 +403,15 @@ export class Vr4300 {
     this.aborted = true;
   }
   /** この命令が例外で打ち切られた（結果を書かない） */
-  private aborted = false;
+  aborted = false;
 
-  private addrError(v: number, write: boolean): void {
+  addrError(v: number, write: boolean): void {
     this.badVaddr = v;
     this.exception(write ? EXC_ADES : EXC_ADEL);
   }
 
   // ---- メモリ（仮想アドレス） ----
-  private r32(v: number): number {
+  r32(v: number): number {
     if (v & 3) {
       this.addrError(v, false);
       return 0;
@@ -417,7 +422,7 @@ export class Vr4300 {
     if (p < b.ramSize) return b.ram32[p >> 2];
     return b.read32(p);
   }
-  private r16(v: number): number {
+  r16(v: number): number {
     if (v & 1) {
       this.addrError(v, false);
       return 0;
@@ -428,38 +433,44 @@ export class Vr4300 {
     if (p < b.ramSize) return b.ram16[(p ^ 2) >> 1];
     return b.read16(p);
   }
-  private r8(v: number): number {
+  r8(v: number): number {
     const p = this.translate(v, false);
     if (p < 0) return 0;
     const b = this.bus;
     if (p < b.ramSize) return b.ram8[p ^ 3];
     return b.read8(p);
   }
-  private w32(v: number, x: number): void {
+  w32(v: number, x: number): void {
     if (v & 3) return this.addrError(v, true);
     const p = this.translate(v, true);
     if (p < 0) return;
     const b = this.bus;
     b.writes++;
-    if (p < b.ramSize) b.ram32[p >> 2] = x;
-    else b.write32(p, x);
+    if (p < b.ramSize) {
+      b.ram32[p >> 2] = x;
+      if (this.jit !== null && this.jit.codeWords[p >> 2]) this.jit.invalidate(p);
+    } else b.write32(p, x);
   }
-  private w16(v: number, x: number): void {
+  w16(v: number, x: number): void {
     if (v & 1) return this.addrError(v, true);
     const p = this.translate(v, true);
     if (p < 0) return;
     const b = this.bus;
     b.writes++;
-    if (p < b.ramSize) b.ram16[(p ^ 2) >> 1] = x;
-    else b.write16(p, x & 0xffff);
+    if (p < b.ramSize) {
+      b.ram16[(p ^ 2) >> 1] = x;
+      if (this.jit !== null && this.jit.codeWords[p >> 2]) this.jit.invalidate(p);
+    } else b.write16(p, x & 0xffff);
   }
-  private w8(v: number, x: number): void {
+  w8(v: number, x: number): void {
     const p = this.translate(v, true);
     if (p < 0) return;
     const b = this.bus;
     b.writes++;
-    if (p < b.ramSize) b.ram8[p ^ 3] = x;
-    else b.write8(p, x & 0xff);
+    if (p < b.ramSize) {
+      b.ram8[p ^ 3] = x;
+      if (this.jit !== null && this.jit.codeWords[p >> 2]) this.jit.invalidate(p);
+    } else b.write8(p, x & 0xff);
   }
 
   // ---- 実行 ----
@@ -471,6 +482,16 @@ export class Vr4300 {
         this.inDelay = this.branched;
         this.exception(EXC_INT);
         continue;
+      }
+      const jit = this.jit;
+      if (jit !== null && !this.branched) {
+        const blk = jit.get(this.pc);
+        if (blk !== null) {
+          blk(this);
+          this.lo[0] = 0;
+          this.hi[0] = 0;
+          continue;
+        }
       }
       this.step();
     }
@@ -520,38 +541,61 @@ export class Vr4300 {
     this.nextPc = (this.nextPc + 4) | 0;
   }
 
-  private checkIdle(target: number): void {
+  /** 待ちループの見張り：同じ分岐先に、書き込みも入出力の読み込みもないまま戻ってきたら、レジスタも変わっていないか比べる */
+  private idleArmed = false;
+  private idleMiss = 0;
+
+  checkIdle(target: number): void {
     const b = this.bus;
-    const s = this.idleSnap;
     if (this.soon) {
       this.soon = false;
       this.idlePc = -1;
       return;
     }
-    if (target === this.idlePc && b.writes === this.idleWrites && !b.volatileRead) {
+    if (target !== this.idlePc) {
+      this.idlePc = target;
+      this.idleWrites = b.writes;
+      b.volatileRead = false;
+      this.idleArmed = false;
+      this.idleMiss = 0;
+      return;
+    }
+    if (b.writes !== this.idleWrites || b.volatileRead) {
+      this.idleWrites = b.writes;
+      b.volatileRead = false;
+      this.idleArmed = false;
+      return;
+    }
+    // レジスタが毎回変わるループ（数を数えるだけの待ちなど）は、何回か外れたらあきらめる
+    if (this.idleMiss > 8) return;
+    const s = this.idleSnap;
+    const lo = this.lo;
+    const hi = this.hi;
+    if (this.idleArmed) {
       let same = true;
-      const lo = this.lo;
-      const hi = this.hi;
-      for (let i = 1; same && i < 32; i++) if (s[i] !== lo[i] || s[32 + i] !== hi[i]) same = false;
+      for (let i = 1; i < 32; i++)
+        if (s[i] !== lo[i] || s[32 + i] !== hi[i]) {
+          same = false;
+          break;
+        }
       if (same) {
         if (b.stopAt > b.cycles) b.cycles = b.stopAt;
         return;
       }
+      this.idleMiss++;
     }
-    this.idlePc = target;
-    s.set(this.lo);
-    s.set(this.hi, 32);
-    this.idleWrites = b.writes;
-    b.volatileRead = false;
+    s.set(lo);
+    s.set(hi, 32);
+    this.idleArmed = true;
   }
 
   /** 32 ビットの結果を入れる（上位は符号で埋める） */
-  private set32(r: number, v: number): void {
+  set32(r: number, v: number): void {
     this.lo[r] = v;
     this.hi[r] = v >> 31;
   }
 
-  private execute(op: number): void {
+  execute(op: number): void {
     const lo = this.lo;
     const hi = this.hi;
     const rs = (op >>> 21) & 31;
@@ -1618,7 +1662,7 @@ export class Vr4300 {
   }
 
   stateSkip(): unknown[] {
-    return [this.f32, this.fi, this.tmpF64, this.tmpI32, this.tmpF32];
+    return [this.f32, this.fi, this.tmpF64, this.tmpI32, this.tmpF32, this.jit];
   }
 }
 

@@ -3,6 +3,7 @@
 // こうしておくと、ゲームごとに違うマイクロコードを 1 つずつ作り直さなくても動く
 
 import { INT_SP, type N64 } from './n64';
+import { RspJit } from './rspjit';
 
 const P47 = 140737488355328; // 2^47
 const P48 = 281474976710656; // 2^48
@@ -41,7 +42,7 @@ function clamp16(v: number): number {
 export class Rsp {
   r = new Int32Array(32);
   pc = 0;
-  private nextPc = 4;
+  nextPc = 4;
   private branched = false;
   /** ベクトルレジスタ：32 本 × 8 要素（要素 0 が上位） */
   v = new Int16Array(32 * 8);
@@ -66,10 +67,22 @@ export class Rsp {
 
   private mem8: Uint8Array;
   private mem32: Int32Array;
+  /** 速く動かすための書き換え */
+  jit: RspJit | null = null;
+  imem32(): Int32Array {
+    return this.mem32;
+  }
+  dmem8(): Uint8Array {
+    return this.mem8;
+  }
+  dmem32(): Int32Array {
+    return this.mem32;
+  }
 
   constructor(private n64: N64) {
     this.mem8 = n64.spMem8;
     this.mem32 = n64.spMem32;
+    this.jit = new RspJit(this);
   }
 
   // ---- レジスタ（CPU から・RSP の COP0 から） ----
@@ -157,6 +170,7 @@ export class Rsp {
     this.status = s;
     if (wasHalted && !(s & 1)) {
       // 動き出す
+      this.lastRun = this.n64.cycles;
       this.nextAt = this.n64.cycles + 200;
       if (this.n64.stopAt > this.nextAt) this.n64.stopAt = this.nextAt;
     }
@@ -168,6 +182,8 @@ export class Rsp {
     const skip = (v >>> 20) & 0xff8;
     const bank = this.memAddr & 0x1000;
     let mem = this.memAddr & 0xff8;
+    let endAddr = this.memAddr & 0x1ff8;
+    const startMem = mem;
     let dram = this.dramAddr;
     const ram = this.n64.ram32;
     const sp = this.mem32;
@@ -181,19 +197,29 @@ export class Rsp {
       }
       mem = (mem + len) & 0xfff;
       dram += len + skip;
+      endAddr += len;
     }
-    this.memAddr = bank | mem;
+    // 終わったあとのアドレスは、DMEM の終わりを越えると IMEM 側のビットまで進む
+    this.memAddr = endAddr & 0x1ff8;
+    if (toSp && bank) this.jit?.invalidate(startMem, count * len);
+    if (!toSp) this.n64.cpu.jit?.invalidateRange(this.dramAddr, dram - this.dramAddr);
     this.dramAddr = dram & 0xfffff8;
     this.rdLen = this.wrLen = 0xff8;
     this.n64.writes++;
   }
 
   /** 時刻が来たら実行する（BREAK で止まるまで。長いときは何回かに分ける） */
+  /** 最後に実行した時刻（RSP は CPU の 2/3 の速さなので、たった時間ぶんだけ進める） */
+  private lastRun = 0;
+
   tick(): void {
     if (this.nextAt < 0 || this.n64.cycles < this.nextAt) return;
     this.nextAt = -1;
     if (this.status & 1) return;
-    this.run(400000);
+    const now = this.n64.cycles;
+    const budget = Math.max(2000, Math.min(300000, Math.floor(((now - this.lastRun) * 2) / 3)));
+    this.lastRun = now;
+    this.run(budget);
     if (!(this.status & 1)) this.nextAt = this.n64.cycles + 3000;
   }
 
@@ -204,11 +230,11 @@ export class Rsp {
   private wb(a: number, v: number): void {
     this.mem8[(a & 0xfff) ^ 3] = v;
   }
-  private rw(a: number): number {
+  rw(a: number): number {
     if (!(a & 3)) return this.mem32[(a & 0xfff) >> 2];
     return (this.rb(a) << 24) | (this.rb(a + 1) << 16) | (this.rb(a + 2) << 8) | this.rb(a + 3);
   }
-  private ww(a: number, v: number): void {
+  ww(a: number, v: number): void {
     if (!(a & 3)) {
       this.mem32[(a & 0xfff) >> 2] = v;
       return;
@@ -231,10 +257,23 @@ export class Rsp {
   }
 
   // ---- 実行 ----
+  private pollPc = -1;
+  private pollVal = 0;
+  private pollN = 0;
+
   run(max: number): void {
+    this.pollPc = -1;
     const r = this.r;
     const mem32 = this.mem32;
+    const jit = this.jit;
     for (let n = 0; n < max; n++) {
+      if (jit !== null && !this.branched) {
+        const blk = jit.get(this.pc);
+        if (blk !== null) {
+          n += blk(this) - 1;
+          continue;
+        }
+      }
       const pc = this.pc;
       const op = mem32[(0x1000 | pc) >> 2];
       const wasBranch = this.branched;
@@ -380,8 +419,19 @@ export class Rsp {
           break;
         case 0x10: {
           const rd = (op >>> 11) & 15;
-          if (rs === 0) r[rt] = this.readCop0(rd);
-          else if (rs === 4) {
+          if (rs === 0) {
+            const val = this.readCop0(rd);
+            r[rt] = val;
+            // 同じ所で同じ値を読み続けている（CPU や RDP を待っている）なら、今回はここで休む
+            if (pc === this.pollPc && val === this.pollVal && n - this.pollN <= 24) {
+              this.pollN = n;
+              r[0] = 0;
+              return;
+            }
+            this.pollPc = pc;
+            this.pollVal = val;
+            this.pollN = n;
+          } else if (rs === 4) {
             this.writeCop0(rd, r[rt]);
             if (this.status & 1) {
               // 自分で止まった
@@ -438,7 +488,7 @@ export class Rsp {
     }
   }
 
-  private cop2(op: number, rs: number, rt: number): void {
+  cop2(op: number, rs: number, rt: number): void {
     if (rs & 0x10) return this.vector(op);
     const rd = (op >>> 11) & 31;
     const e = (op >>> 7) & 15;
@@ -477,7 +527,7 @@ export class Rsp {
     }
   }
 
-  private lwc2(op: number, rs: number, vt: number): void {
+  lwc2(op: number, rs: number, vt: number): void {
     const e = (op >>> 7) & 15;
     const off = (op << 25) >> 25;
     const base = this.r[rs];
@@ -559,7 +609,7 @@ export class Rsp {
     }
   }
 
-  private swc2(op: number, rs: number, vt: number): void {
+  swc2(op: number, rs: number, vt: number): void {
     const e = (op >>> 7) & 15;
     const off = (op << 25) >> 25;
     const base = this.r[rs];
@@ -696,13 +746,12 @@ export class Rsp {
     return result;
   }
 
-  private vector(op: number): void {
+  vector(op: number): void {
     const e = (op >>> 21) & 15;
     const vtR = (op >>> 16) & 31;
     const vsR = (op >>> 11) & 31;
     const vdR = (op >>> 6) & 31;
     const v = this.v;
-    const acc = this.acc;
     const bc = BC[e];
     const t = this.vte;
     for (let i = 0; i < 8; i++) t[i] = v[vtR * 8 + bc[i]];
@@ -710,6 +759,20 @@ export class Rsp {
     const d = vdR * 8;
     const out = this.tmp;
     const f = op & 63;
+    let ok: boolean;
+    if (f < 0x10) ok = this.vMul(f, e, vsR, s, d, t, out);
+    else if (f < 0x20) ok = f === 0x1d || f <= 0x15 ? this.vAdd(f, e, vsR, s, d, t, out) : this.vRsvd(f, e, vsR, s, d, t, out);
+    else if (f < 0x28) ok = this.vCmp(f, e, vsR, s, d, t, out);
+    else if (f < 0x30) ok = f <= 0x2d ? this.vLogic(f, e, vsR, s, d, t, out) : this.vRsvd(f, e, vsR, s, d, t, out);
+    else if (f <= 0x37 || f === 0x3f) ok = f === 0x3f ? false : this.vDiv(f, e, vsR, s, d, t, out);
+    else ok = this.vRsvd(f, e, vsR, s, d, t, out);
+    if (!ok) return;
+    for (let i = 0; i < 8; i++) v[d + i] = out[i];
+  }
+
+  private vMul(f: number, e: number, vsR: number, s: number, d: number, t: Int16Array, out: Int16Array): boolean {
+    const v = this.v;
+    const acc = this.acc;
     switch (f) {
       case 0x00:
       case 0x01:
@@ -808,6 +871,16 @@ export class Rsp {
           else out[i] = h < -32768 ? 0 : h > 32767 ? 0xffff : a - h * 65536;
         }
         break;
+      default:
+        return this.vRsvd(f, e, vsR, s, d, t, out);
+    }
+    return true;
+  }
+
+  private vAdd(f: number, e: number, vsR: number, s: number, d: number, t: Int16Array, out: Int16Array): boolean {
+    const v = this.v;
+    const acc = this.acc;
+    switch (f) {
       case 0x10:
         for (let i = 0; i < 8; i++) {
           const r = v[s + i] + t[i] + ((this.vco >> i) & 1);
@@ -871,6 +944,15 @@ export class Rsp {
           else out[i] = 0;
         }
         break;
+      default:
+        return this.vRsvd(f, e, vsR, s, d, t, out);
+    }
+    return true;
+  }
+
+  private vCmp(f: number, e: number, vsR: number, s: number, d: number, t: Int16Array, out: Int16Array): boolean {
+    const v = this.v;
+    switch (f) {
       case 0x20:
       case 0x21:
       case 0x22:
@@ -996,6 +1078,15 @@ export class Rsp {
         }
         this.vco = 0;
         break;
+      default:
+        return this.vRsvd(f, e, vsR, s, d, t, out);
+    }
+    return true;
+  }
+
+  private vLogic(f: number, e: number, vsR: number, s: number, d: number, t: Int16Array, out: Int16Array): boolean {
+    const v = this.v;
+    switch (f) {
       case 0x28:
       case 0x29:
       case 0x2a:
@@ -1029,6 +1120,15 @@ export class Rsp {
           this.setAccLow(i, r);
         }
         break;
+      default:
+        return this.vRsvd(f, e, vsR, s, d, t, out);
+    }
+    return true;
+  }
+
+  private vDiv(f: number, e: number, vsR: number, s: number, d: number, t: Int16Array, out: Int16Array): boolean {
+    const v = this.v;
+    switch (f) {
       case 0x30:
       case 0x31:
       case 0x34:
@@ -1065,13 +1165,27 @@ export class Rsp {
         break;
       case 0x37:
       case 0x3f:
-        return;
+        return false;
       default:
-        // 使われない番号：0 になる
-        for (let i = 0; i < 8; i++) out[i] = 0;
+        return this.vRsvd(f, e, vsR, s, d, t, out);
     }
-    for (let i = 0; i < 8; i++) v[d + i] = out[i];
+    return true;
   }
+
+  private vRsvd(f: number, e: number, vsR: number, s: number, d: number, t: Int16Array, out: Int16Array): boolean {
+    const v = this.v;
+    switch (f) {
+      default:
+        // 使われない番号：アキュムレーターの下位に足した値が入り、結果は 0 になる
+        for (let i = 0; i < 8; i++) {
+          this.setAccLow(i, v[s + i] + t[i]);
+          out[i] = 0;
+        }
+    
+    }
+    return true;
+  }
+
 
   /** アキュムレーターの下位 16 ビットだけ入れ替える */
   private setAccLow(i: number, val: number): void {
@@ -1080,6 +1194,6 @@ export class Rsp {
   }
 
   stateSkip(): unknown[] {
-    return [this.mem8, this.mem32, this.tmp, this.vte];
+    return [this.mem8, this.mem32, this.tmp, this.vte, this.jit];
   }
 }

@@ -67,6 +67,8 @@ export interface Machine {
   setPalette(id: string): void;
   /** 画面の縦横比（なければ width・height のとおり。プレイステーションはいつも 4:3） */
   readonly aspect?: [number, number];
+  /** このフレームの絵を描かずに進める（重い本体で、遅れを取り戻すとき） */
+  setSkip?(on: boolean): void;
   /** 改造コード：RAM に書く・読む（アドレスは本体の CPU から見た番地） */
   poke?(addr: number, v: number): void;
   peek?(addr: number): number;
@@ -820,6 +822,9 @@ class N64Machine implements Machine {
   runFrame() {
     this.n64.runFrame();
   }
+  setSkip(on: boolean) {
+    this.n64.skipDraw = on;
+  }
   setButtons(b: number) {
     this.pad = b;
     let p = 0;
@@ -895,6 +900,9 @@ class N64Machine implements Machine {
   }
   loadState(st: SaveState) {
     applyState(st, 'n64', this.data.length, this.parts());
+    this.n64.cpu.jit?.clear();
+    this.n64.rsp.jit?.clear();
+    this.n64.rdp.decodeCombine();
     this.n64.render();
     this.n64.saveDirty = true;
     this.setButtons(this.pad);
