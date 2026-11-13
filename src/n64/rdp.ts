@@ -897,6 +897,10 @@ export class Rdp {
     const tex1 = (tile + 1) & 7;
     const z = this.omLo & 4 ? this.primZ << 3 : -1;
     this.shade.fill(0);
+    if (cycle === 0) {
+      this.texRect1(flip, x0, y0, x1, y1, x0r, y0r, s0, t0, dsdx, dtdy, tile, z);
+      return;
+    }
     for (let y = y0; y < y1; y++) {
       const tv = t0 + (y - y0r) * dtdy;
       for (let x = x0; x < x1; x++) {
@@ -922,6 +926,69 @@ export class Rdp {
         }
         this.combine(1);
         this.plot(x, y, z, this.primDz);
+      }
+    }
+  }
+
+  /** 1 サイクルの四角形（2D の絵・文字・背景）。よくある場合は関数を呼ばずにその場で書く */
+  private texRect1(
+    flip: boolean,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    x0r: number,
+    y0r: number,
+    s0: number,
+    t0: number,
+    dsdx: number,
+    dtdy: number,
+    tile: number,
+    z: number,
+  ): void {
+    const lo = this.omLo;
+    const comb = this.comb;
+    const tex = this.texel0;
+    const passD = this.passD[1];
+    const D = this.cD[1][0];
+    const DA = this.aD[1];
+    // 重ねるとき：まったく不透明ならそのまま書き、まったく透明なら何もしない（Z を使わないとき）
+    const fast = (lo & 0x4000) !== 0 && this.stdBlend && !(lo & 0x2000) && (z < 0 || !(lo & 0x30));
+    const n = this.n64;
+    const ci = this.ciSize;
+    const ram16 = n.ram16;
+    const ram32 = n.ram32;
+    const max = n.ramSize;
+    const dz = this.primDz;
+    for (let y = y0; y < y1; y++) {
+      const tv = t0 + (y - y0r) * dtdy;
+      const row = y * this.ciWidth;
+      for (let x = x0; x < x1; x++) {
+        const sv = s0 + (x - x0r) * dsdx;
+        if (flip) this.sample(tile, tv >> 5, sv >> 5, tex);
+        else this.sample(tile, sv >> 5, tv >> 5, tex);
+        if (passD) {
+          comb[0] = D[0];
+          comb[1] = D[1];
+          comb[2] = D[2];
+          comb[3] = DA[3];
+        } else this.combine(1);
+        const a = comb[3];
+        if (fast) {
+          if (a === 0) continue;
+          if (a === 255) {
+            const i = row + x;
+            if (ci === 2) {
+              const ad = this.ciAddr + i * 2;
+              if (ad < max) ram16[(ad >> 1) ^ 1] = ((comb[0] >> 3) << 11) | ((comb[1] >> 3) << 6) | ((comb[2] >> 3) << 1) | 1;
+            } else if (ci === 3) {
+              const ad = this.ciAddr + i * 4;
+              if (ad < max) ram32[ad >> 2] = (comb[0] << 24) | (comb[1] << 16) | (comb[2] << 8) | 0xff;
+            } else this.writeFb(i, comb[0], comb[1], comb[2]);
+            continue;
+          }
+        }
+        this.plot(x, y, z, dz);
       }
     }
   }

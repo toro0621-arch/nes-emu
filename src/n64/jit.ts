@@ -30,6 +30,8 @@ export class Jit {
   codeWords: Uint8Array;
   /** compile が最後に作ったブロックの命令数 */
   private lastLen = 0;
+  /** 調べるとき用：作った関数の中身（null なら残さない） */
+  debugSrc: Map<number, string> | null = null;
   /** 関数を作れない環境（CSP など）なら false */
   ok = true;
 
@@ -101,6 +103,8 @@ export class Jit {
     let n = 0;
     let ended = false;
     const pageEnd = (pc & ~0xfff) + 0x1000;
+    // 実行した命令のぶんだけ時間を進める（ブロックの途中で抜けるときも、その時点までの数で）
+    const cyc = (code: string, k: number) => code.replace(/return;/g, `{b.cycles+=${k * CYCLES_PER_OP};return;}`);
     while (n < MAX_OPS && !ended) {
       const op = ram32[(addr & 0x7fffff) >> 2];
       const kind = this.classify(op);
@@ -109,35 +113,39 @@ export class Jit {
         if (addr + 4 >= pageEnd) break;
         const slot = ram32[((addr + 4) & 0x7fffff) >> 2];
         if (this.classify(slot) !== 'simple') {
-          lines.push(this.generic(op, addr, true));
+          lines.push(cyc(this.generic(op, addr, true), n + 1));
           n++;
           ended = true;
           break;
         }
-        lines.push(this.branch(op, addr, slot));
+        // 条件つきの分岐で、飛ばなかったときの続きも同じページにあれば、そのまま続けて書く（関数を呼ぶ回数を減らす）
+        const go = this.conditional(op) && n + 2 < MAX_OPS && addr + 8 < pageEnd;
+        lines.push('{' + this.branch(op, addr, slot, n + 2, !go) + '}');
         n += 2;
-        ended = true;
-        break;
+        if (!go) {
+          ended = true;
+          break;
+        }
+        addr += 8;
+        continue;
       }
       if (kind === 'end') {
-        lines.push(this.generic(op, addr, true));
+        lines.push(cyc(this.generic(op, addr, true), n + 1));
         n++;
         ended = true;
         break;
       }
-      lines.push(kind === 'simple' ? this.simple(op, addr, false) : this.generic(op, addr, false));
+      lines.push(cyc(kind === 'simple' ? this.simple(op, addr, false) : this.generic(op, addr, false), n + 1));
       n++;
       addr += 4;
       if (addr >= pageEnd) break;
     }
     // 1 命令も書けなかった（ページの終わりの分岐など）ときは、ふつうに実行する
     if (n === 0) return null;
-    this.lastLen = n;
-    if (!ended) lines.push(`c.pc=${addr | 0};c.nextPc=${(addr + 4) | 0};`);
-    const body =
-      `return function(c){const b=c.bus;b.cycles+=${n * CYCLES_PER_OP};c.aborted=false;let a=0,v=0,t=0;` +
-      lines.join('\n') +
-      '}';
+    this.lastLen = Math.max(n, ((addr - pc) >> 2) + 1);
+    if (!ended) lines.push(`b.cycles+=${n * CYCLES_PER_OP};c.pc=${addr | 0};c.nextPc=${(addr + 4) | 0};`);
+    const body = 'return function(c){const b=c.bus;c.aborted=false;let a=0,v=0,t=0;' + lines.join('\n') + '}';
+    if (this.debugSrc) this.debugSrc.set(pc, body);
     try {
       return new Function('lo', 'hi', 'ram8', 'ram16', 'ram32', 'cp', 'mulHi', 'dsh', body)(
         c.lo,
@@ -394,21 +402,40 @@ export class Jit {
   }
 
   /** 分岐 + 遅延スロット */
-  private branch(op: number, addr: number, slot: number): string {
+  /** 条件つきの分岐（飛ばないこともある）か */
+  private conditional(op: number): boolean {
+    const o = op >>> 26;
+    return o === 0x01 || (o >= 0x04 && o <= 0x07) || (o >= 0x14 && o <= 0x17);
+  }
+
+  /** k：ここまでに実行した命令の数（遅延スロットを含む）。final：ここでブロックを終える */
+  private branch(op: number, addr: number, slot: number, k: number, final: boolean): string {
+    const adv = `b.cycles+=${k * CYCLES_PER_OP};`;
     const rs = (op >>> 21) & 31;
     const rt = (op >>> 16) & 31;
     const imm = (op << 16) >> 16;
     const rel = (addr + 4 + (imm << 2)) | 0;
     const next = (addr + 8) | 0;
     const link = (r: number) => (r ? `lo[${r}]=${next};hi[${r}]=${next >> 31};` : '');
-    const slotCode = this.simple(slot, addr + 4, true);
+    const slotCode = this.simple(slot, addr + 4, true).replace(/return;/g, `{${adv}return;}`);
     const idle = (target: string) => `t=${addr | 0}-(${target});if(t>=0&&t<=32){c.curPc=${addr | 0};c.checkIdle(${target});}`;
     // 条件つきの分岐
-    const cond = (expr: string, likely: boolean, linkReg = 0) =>
-      `const take=${expr};${link(linkReg)}` +
-      (likely
-        ? `if(take){${slotCode}c.pc=${rel};c.nextPc=${(rel + 4) | 0};${idle(String(rel))}}else{c.pc=${next};c.nextPc=${(next + 4) | 0};}`
-        : `${slotCode}if(take){c.pc=${rel};c.nextPc=${(rel + 4) | 0};${idle(String(rel))}}else{c.pc=${next};c.nextPc=${(next + 4) | 0};}`);
+    const cond = (expr: string, likely: boolean, linkReg = 0) => {
+      const head = `const take=${expr};${link(linkReg)}`;
+      const jump = `c.pc=${rel};c.nextPc=${(rel + 4) | 0};${idle(String(rel))}`;
+      if (!final) {
+        // 飛んだらここで抜ける。飛ばなければ続きへ
+        return likely
+          ? `${head}if(take){${slotCode}${adv}${jump}return;}`
+          : `${head}${slotCode}if(take){${adv}${jump}return;}`;
+      }
+      const fall = `c.pc=${next};c.nextPc=${(next + 4) | 0};`;
+      return (
+        adv +
+        head +
+        (likely ? `if(take){${slotCode}${jump}}else{${fall}}` : `${slotCode}if(take){${jump}}else{${fall}}`)
+      );
+    };
     const eq = `(lo[${rs}]===lo[${rt}]&&hi[${rs}]===hi[${rt}])`;
     const lez = `(hi[${rs}]<0||(hi[${rs}]===0&&lo[${rs}]===0))`;
     const gtz = `(hi[${rs}]>0||(hi[${rs}]===0&&lo[${rs}]!==0))`;
@@ -417,7 +444,7 @@ export class Jit {
         // JR・JALR
         const rd = (op >>> 11) & 31;
         const jalr = (op & 63) === 0x09;
-        return `const tgt=lo[${rs}];${jalr ? link(rd) : ''}${slotCode}c.pc=tgt;c.nextPc=(tgt+4)|0;${idle('tgt')}`;
+        return `${adv}const tgt=lo[${rs}];${jalr ? link(rd) : ''}${slotCode}c.pc=tgt;c.nextPc=(tgt+4)|0;${idle('tgt')}`;
       }
       case 0x01: {
         const neg = `(hi[${rs}]<0)`;
@@ -444,7 +471,7 @@ export class Jit {
       case 0x02:
       case 0x03: {
         const tgt = ((addr + 4) & 0xf0000000) | ((op & 0x3ffffff) << 2);
-        return `${op >>> 26 === 0x03 ? link(31) : ''}${slotCode}c.pc=${tgt | 0};c.nextPc=${(tgt + 4) | 0};${idle(String(tgt | 0))}`;
+        return `${adv}${op >>> 26 === 0x03 ? link(31) : ''}${slotCode}c.pc=${tgt | 0};c.nextPc=${(tgt + 4) | 0};${idle(String(tgt | 0))}`;
       }
       case 0x04:
         return cond(eq, false);

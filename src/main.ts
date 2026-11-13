@@ -1240,7 +1240,8 @@ function loop(now: number): void {
     const FRAME_MS = 1000 / machine.fps;
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);
     // 絵を間引ける本体は、遅れているときは最後の 1 フレームだけ描く
-    const canSkip = !!machine.setSkip;
+    // NINTENDO64 は、前の絵に重ねて描くゲーム（文字を 1 文字ずつ足す・残像）があり、早送りで絵を省くと文字がちらつくので、早送りでは省かない
+    const canSkip = !!machine.setSkip && !(fastForward && machine.system === 'n64');
     let ran = false;
     // 半フレーム分たまったら 1 フレーム進める（60Hz 画面で毎回 1 フレームになるように）
     let rewound = false;
@@ -1256,7 +1257,7 @@ function loop(now: number): void {
       }
       machine.setButtons(touch.read() | keyboard.read());
       if (cheats.active && machine.poke) cheats.apply(machine as unknown as CheatTarget);
-      if (canSkip) machine.setSkip!(acc >= FRAME_MS * 1.5);
+      if (machine.setSkip) machine.setSkip(canSkip && acc >= FRAME_MS * 1.5);
       machine.runFrame();
       rewind.record(machine);
       acc -= FRAME_MS;
