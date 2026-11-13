@@ -4,6 +4,7 @@
 
 import { INT_SP, type N64 } from './n64';
 import { RspJit } from './rspjit';
+import { AudioHle } from './audiohle';
 
 const P47 = 140737488355328; // 2^47
 const P48 = 281474976710656; // 2^48
@@ -69,6 +70,12 @@ export class Rsp {
   private mem32: Int32Array;
   /** 速く動かすための書き換え */
   jit: RspJit | null = null;
+  /** 標準の音声マイクロコードを JavaScript で直接処理する（null = いつも RSP を動かす） */
+  hle: AudioHle | null = null;
+  /** 動き出したばかり（タスクの始まり） */
+  private fresh = false;
+  /** 音のタスクを処理し終え、終わったことを知らせるのを待っている */
+  private hleWait = false;
   imem32(): Int32Array {
     return this.mem32;
   }
@@ -83,6 +90,7 @@ export class Rsp {
     this.mem8 = n64.spMem8;
     this.mem32 = n64.spMem32;
     this.jit = new RspJit(this);
+    this.hle = new AudioHle(n64);
   }
 
   // ---- レジスタ（CPU から・RSP の COP0 から） ----
@@ -171,6 +179,8 @@ export class Rsp {
     if (wasHalted && !(s & 1)) {
       // 動き出す
       this.lastRun = this.n64.cycles;
+      this.fresh = true;
+      this.hleWait = false;
       this.nextAt = this.n64.cycles + 200;
       if (this.n64.stopAt > this.nextAt) this.n64.stopAt = this.nextAt;
     }
@@ -216,11 +226,37 @@ export class Rsp {
     if (this.nextAt < 0 || this.n64.cycles < this.nextAt) return;
     this.nextAt = -1;
     if (this.status & 1) return;
+    if (this.hleWait) {
+      // マイクロコードと同じ終わり方（「タスク終わり」の合図 sig2 を立てて BREAK）
+      this.hleWait = false;
+      this.status |= 0x203;
+      if (this.status & 0x40) this.n64.raise(INT_SP);
+      return;
+    }
+    if (this.fresh) {
+      this.fresh = false;
+      if (this.hle !== null && this.runHle()) return;
+    }
     const now = this.n64.cycles;
     const budget = Math.max(2000, Math.min(300000, Math.floor(((now - this.lastRun) * 2) / 3)));
     this.lastRun = now;
     this.run(budget);
     if (!(this.status & 1)) this.nextAt = this.n64.cycles + 3000;
+  }
+
+  /** 音のタスクなら JavaScript で処理して終わらせる */
+  private runHle(): boolean {
+    const t = 0xfc0 >> 2;
+    if (this.mem32[t] !== 2 || this.pc !== 0) return false;
+    const ucodeData = this.mem32[t + 6] & 0xffffff;
+    if (!AudioHle.detect(this.n64, ucodeData)) return false;
+    const size = this.mem32[t + 13];
+    this.hle!.run(this.mem32[t + 12] & 0xffffff, size, ucodeData);
+    // 本物の RSP がかかるくらいの時間がたってから終わらせる（すぐ終わると、待つ側の準備ができていないことがある）
+    this.hleWait = true;
+    this.nextAt = this.n64.cycles + Math.min(400000, 20000 + (size >> 3) * 150);
+    if (this.n64.stopAt > this.nextAt) this.n64.stopAt = this.nextAt;
+    return true;
   }
 
   // ---- メモリ（DMEM の中で折り返す） ----
@@ -1194,6 +1230,6 @@ export class Rsp {
   }
 
   stateSkip(): unknown[] {
-    return [this.mem8, this.mem32, this.tmp, this.vte, this.jit];
+    return [this.mem8, this.mem32, this.tmp, this.vte, this.jit, this.hle];
   }
 }
