@@ -382,6 +382,21 @@ const updateSW = registerSW({
   onOfflineReady() {
     showToast('オフラインでも使えるようになりました');
   },
+  // ブラウザが新しい版を調べるのは、ふつうアプリを開き直したときだけ。
+  // スマホのアプリは裏に置いたまま使い続けることが多いので、前に出てきたときと 30 分ごとにも調べる
+  onRegisteredSW(_url, reg) {
+    if (!reg) return;
+    let last = Date.now();
+    const check = () => {
+      if (!navigator.onLine || Date.now() - last < 60_000) return;
+      last = Date.now();
+      void reg.update().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') check();
+    });
+    setInterval(check, 30 * 60_000);
+  },
 });
 
 resetButton.addEventListener('click', () => {
