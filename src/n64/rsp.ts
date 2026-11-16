@@ -89,7 +89,9 @@ export class Rsp {
   constructor(private n64: N64) {
     this.mem8 = n64.spMem8;
     this.mem32 = n64.spMem32;
-    this.jit = new RspJit(this);
+    // RSP の命令を JavaScript の関数に書き換える仕組み（RspJit）は、測ると 1 命令ずつ実行するより遅かったので使わない。
+    // 小さい関数がたくさんできると、JavaScript のエンジンがなかなか速い形にしてくれないため（試すときは new RspJit(this) を入れる）
+    this.jit = null;
     this.hle = new AudioHle(n64);
   }
 

@@ -8,8 +8,14 @@ import { CYCLES_PER_OP, type Vr4300 } from './cpu';
 type Block = (c: Vr4300) => void;
 
 const MAX_OPS = 64;
+/** この回数だけ入口として通ったら関数にする */
+const HOT = 30000;
 /** 1 つの関数にまとめる範囲（2 の何乗バイトか）。大きすぎると関数が大きくなって速くならない */
-const REGION = 8;
+const REGION = 10;
+/** 新しいブロックが出なくなってから、まとめるまでのフレーム数 */
+const SETTLE = 20;
+/** 1 つの関数にまとめる中身の大きさの上限（文字数） */
+const MAX_SRC = 30000;
 
 /** その場で JavaScript にできる SPECIAL の命令 */
 const SIMPLE_FUNCT = new Set([
@@ -28,6 +34,11 @@ export class Jit {
   private pageSrc = new Map<number, Map<number, string>>();
   /** ページごとの書き換えの回数（関数を作ったあとに書き換えられたら、その関数はすぐ抜ける） */
   pageGen: Int32Array;
+  /** 4 バイトごとの、入口として通った回数 */
+  private heat: Uint16Array;
+  /** まとめ直しを待っている範囲 → 最後に新しいブロックが出たときの tick */
+  private pending = new Map<number, number>();
+  private tickNo = 0;
   /** プログラムを関数にしたページの印（書き込まれたら捨てる） */
   codePages: Uint8Array;
   /** 関数にした命令のワードの印（ここに書き込まれたら、そのページの関数を捨てる） */
@@ -45,6 +56,7 @@ export class Jit {
   ) {
     this.codePages = new Uint8Array(ramSize >> 12);
     this.pageGen = new Int32Array(ramSize >> 12);
+    this.heat = new Uint16Array(ramSize >> 2);
     this.codeWords = new Uint8Array(ramSize >> 2);
     this.blocks = new Array<Block | null>(ramSize >> 2).fill(null);
     try {
@@ -54,11 +66,22 @@ export class Jit {
     }
   }
 
+  /** もう関数になっていればそれを返す（数えない・作らない） */
+  peek(pc: number): Block | null {
+    return (pc & RAM_MASK) === KSEG ? this.blocks[(pc & 0x7fffff) >> 2] : null;
+  }
+
   get(pc: number): Block | null {
     if ((pc & RAM_MASK) !== KSEG) return null;
     const i = (pc & 0x7fffff) >> 2;
     const b = this.blocks[i];
     if (b !== null) return b;
+    // あまり通らない所は、関数にしないでインタープリターで実行する
+    // （関数にしても、JavaScript のエンジンが速い形にしてくれるまではインタープリターより遅い）
+    if (this.heat[i] < HOT) {
+      this.heat[i]++;
+      return null;
+    }
     const body = this.compile(pc);
     if (body === null) return null;
     this.codeWords.fill(1, i, Math.min(this.codeWords.length, i + this.lastLen));
@@ -71,11 +94,48 @@ export class Jit {
       this.pageSrc.set(region, src);
     }
     src.set(i, body);
-    // 近くのブロックをまとめて 1 つの関数にし直す（関数の数が多いと、呼ぶたびに遅くなるため）
-    const fn = this.buildPage(page, region, src);
+    // まずはこのブロックだけの関数にする。まわりのブロックとまとめるのは、新しいブロックが出なくなってから（tick）
+    const fn = this.buildPage(page, region, new Map([[i, body]]));
     if (!fn) return null;
-    for (const k of src.keys()) this.blocks[k] = fn;
+    this.blocks[i] = fn;
+    this.pending.set(region, this.tickNo);
     return fn;
+  }
+
+  /**
+   * 1 フレームに 1 回呼ぶ。しばらく新しいブロックが出ていない範囲のブロックを、1 つの関数にまとめ直す。
+   * JavaScript のエンジンは、小さい関数がたくさんあると 1 つ 1 つをなかなか速い形にしてくれない。
+   * まとめておくと、呼ぶ回数が減り、よく通るところがすぐ速い形になる。
+   * （新しいブロックが出るたびにまとめ直すと、そのたびに遅い形に戻ってしまうので、落ち着いてからまとめる）
+   */
+  tick(): void {
+    this.tickNo++;
+    if (this.pending.size === 0) return;
+    for (const [region, at] of this.pending) {
+      if (this.tickNo - at < SETTLE) continue;
+      this.pending.delete(region);
+      const src = this.pageSrc.get(region);
+      if (!src || src.size < 2) continue;
+      const page = (region << REGION) >> 12;
+      // 大きすぎる関数は速い形にしてもらえないので、アドレス順に区切る
+      const keys = [...src.keys()].sort((a, b) => a - b);
+      let part = new Map<number, string>();
+      let size = 0;
+      const flush = () => {
+        if (part.size === 0) return;
+        const fn = this.buildPage(page, region, part);
+        if (fn) for (const k of part.keys()) this.blocks[k] = fn;
+        part = new Map();
+        size = 0;
+      };
+      for (const k of keys) {
+        const body = src.get(k)!;
+        if (size + body.length > MAX_SRC) flush();
+        part.set(k, body);
+        size += body.length;
+      }
+      flush();
+    }
   }
 
   /** ページの中のブロックを、switch で行き来する 1 つの関数にする */
@@ -118,11 +178,13 @@ export class Jit {
     if (!this.codePages[page]) return;
     this.codePages[page] = 0;
     this.pageGen[page]++;
+    this.heat.fill(0, page << 10, (page + 1) << 10);
     for (let r = (page << 12) >> REGION; r < ((page + 1) << 12) >> REGION; r++) {
       const src = this.pageSrc.get(r);
       if (!src) continue;
       for (const k of src.keys()) this.blocks[k] = null;
       this.pageSrc.delete(r);
+      this.pending.delete(r);
     }
     this.codeWords.fill(0, page << 10, (page + 1) << 10);
     // ブロックはページをまたがないが、遅延スロットのぶん次のページの最初のワードに印があるかもしれない
@@ -137,6 +199,8 @@ export class Jit {
   clear(): void {
     this.blocks.fill(null);
     this.pageSrc.clear();
+    this.pending.clear();
+    this.heat.fill(0);
     this.pageGen.fill(0);
     this.codePages.fill(0);
     this.codeWords.fill(0);

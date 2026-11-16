@@ -3,6 +3,7 @@
 // RDRAM の中の画面に書き込む
 
 import { INT_DP, type N64 } from './n64';
+import { RdpJit, type PixelSpec, type RectFn, type SpanFn, type TileSpec } from './rdpjit';
 
 /** コマンドの長さ（64 ビットのワード数） */
 const CMD_LEN = new Uint8Array(64).fill(1);
@@ -99,8 +100,40 @@ export class Rdp {
   private noise = new Int32Array(4);
   private tmpC = new Int32Array(4);
 
+  /** 設定に合わせて作った「1 ドットを描く」関数（null なら、いつもふつうの描き方） */
+  jit: RdpJit | null = new RdpJit(Z_DEC, zEncode);
+  private spanP = new Float64Array(20);
+
   constructor(private n64: N64) {
     this.decodeCombine();
+  }
+
+  private tileSpec(i: number): TileSpec {
+    const t = this.tiles[i];
+    return { size: t.size, format: t.format, cs: t.cs, ms: t.ms, ct: t.ct, mt: t.mt, maskS: t.maskS !== 0, maskT: t.maskT !== 0, shiftS: t.shiftS, shiftT: t.shiftT };
+  }
+
+  /** 今の設定に合った関数（作れなければ null） */
+  private pixFn(kind: PixelSpec['kind'], two: boolean, hasZ: boolean, flip: boolean, shadeOn: boolean, texOn: boolean, zOn: boolean, tile: number): RectFn | SpanFn | null {
+    const jit = this.jit;
+    if (jit === null) return null;
+    const tex = kind === 'rect' || (kind === 'tri' && texOn);
+    return jit.get({
+      kind,
+      omHi: this.omHi,
+      omLo: this.omLo,
+      combHi: this.combHi,
+      combLo: this.combLo,
+      ciSize: this.ciSize,
+      two,
+      hasZ,
+      flip,
+      shadeOn,
+      texOn,
+      zOn,
+      t0: tex ? this.tileSpec(tile) : null,
+      t1: tex && two ? this.tileSpec((tile + 1) & 7) : null,
+    });
   }
 
   readReg(r: number): number {
@@ -875,6 +908,11 @@ export class Rdp {
     this.texel1.fill(0);
     const two = cycle === 1;
     const z = this.omLo & 4 ? this.primZ << 3 : -1;
+    const fn = this.pixFn('fill', two, z >= 0, false, false, false, false, 0) as RectFn | null;
+    if (fn !== null) {
+      fn(this, x0, y0, x1, y1, 0, 0, 0, 0, 0, 0, 0);
+      return;
+    }
     // テクスチャもシェードもないので、合成した色は四角形のどこでも同じ（1 回だけ計算する）
     if (two) this.combine(0);
     this.combine(1);
@@ -931,6 +969,13 @@ export class Rdp {
     const tex1 = (tile + 1) & 7;
     const z = this.omLo & 4 ? this.primZ << 3 : -1;
     this.shade.fill(0);
+    if (cycle < 2) {
+      const fn = this.pixFn('rect', two, z >= 0, flip, false, true, false, tile) as RectFn | null;
+      if (fn !== null) {
+        fn(this, x0, y0, x1, y1, x0r, y0r, s0, t0, dsdx, dtdy, tile);
+        return;
+      }
+    }
     if (cycle === 0) {
       this.texRect1(flip, x0, y0, x1, y1, x0r, y0r, s0, t0, dsdx, dtdy, tile, z);
       return;
@@ -1108,6 +1153,20 @@ export class Rdp {
       this.texel1.fill(0);
     }
 
+    const span = cycle < 2 ? (this.pixFn('tri', two, useZ, false, shadeOn, texOn, zOn, tile) as SpanFn | null) : null;
+    const P = this.spanP;
+    if (span !== null) {
+      P[9] = drdx;
+      P[10] = dgdx;
+      P[11] = dbdx;
+      P[12] = dadx;
+      P[13] = dsdx;
+      P[14] = dtdx;
+      P[15] = dwdx;
+      P[16] = dzdx;
+      P[17] = dzTol;
+      P[18] = tile;
+    }
     const yhBase = yh & ~3;
     const y0 = Math.max(yh >> 2, this.scY0);
     const y1 = Math.min((yl - 1) >> 2, this.scY1 - 1);
@@ -1142,6 +1201,19 @@ export class Rdp {
       const et = t0 + dtde * dy;
       const ew = w0 + dwde * dy;
       const ez = z0 + dzde * dy;
+      if (span !== null) {
+        P[0] = xMajor;
+        P[1] = er;
+        P[2] = eg;
+        P[3] = eb;
+        P[4] = ea;
+        P[5] = es;
+        P[6] = et;
+        P[7] = ew;
+        P[8] = ez;
+        span(this, P, y, xs, xe);
+        continue;
+      }
       for (let x = xs; x <= xe; x++) {
         const dx = x - xMajor;
         if (shadeOn) {
@@ -1200,7 +1272,7 @@ export class Rdp {
   }
 
   stateSkip(): unknown[] {
-    return [this.w, this.one, this.zero, this.tmpC, this.pix, this.cA, this.cB, this.cC, this.cD, this.aA, this.aB, this.aC, this.aD, this.cCa];
+    return [this.jit, this.spanP, this.w, this.one, this.zero, this.tmpC, this.pix, this.cA, this.cB, this.cC, this.cD, this.aA, this.aB, this.aC, this.aD, this.cCa];
   }
 }
 

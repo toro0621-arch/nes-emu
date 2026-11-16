@@ -805,6 +805,7 @@ export class N64 implements N64Bus {
   }
 
   runFrame(): void {
+    this.cpu.jit?.tick();
     const lines = ((this.vi[6] & 0x3ff) || 0x20c) + 1;
     const frameCycles = Math.round(N64_CLOCK / this.fps);
     const start = this.cycles;

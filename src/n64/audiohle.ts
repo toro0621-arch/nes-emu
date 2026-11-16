@@ -348,7 +348,6 @@ export class AudioHle {
     const inp = this.inp;
     const outs = [this.out, this.dryRight, this.wetLeft, this.wetRight];
     const nb = aux ? 4 : 2;
-    const gains = [0, 0, 0, 0];
     const lanes = new Int32Array(16);
     for (let k = 0; k < 8; k++) {
       lanes[k] = value[0];
@@ -363,25 +362,34 @@ export class AudioHle {
         }
       }
       for (let x = 0; x < 8; x++) {
-        const vol = [0, 0];
-        for (let s = 0; s < 2; s++) {
-          value[s] += step[s];
-          const reached = step[s] <= 0 ? value[s] <= tgt[s] : value[s] >= tgt[s];
-          if (reached) {
-            value[s] = tgt[s];
-            step[s] = 0;
-          }
-          vol[s] = ((value[s] | 0) >> 16) | 0;
-          lanes[s * 8 + x] = value[s] | 0;
+        // 左右の音量を 1 サンプルぶん進める（毎回配列を作ると遅いので、変数に展開してある）
+        let v0 = value[0] + step[0];
+        if (step[0] <= 0 ? v0 <= tgt[0] : v0 >= tgt[0]) {
+          v0 = tgt[0];
+          step[0] = 0;
         }
-        gains[0] = clamp16((vol[0] * dry + 0x4000) >> 15);
-        gains[1] = clamp16((vol[1] * dry + 0x4000) >> 15);
-        gains[2] = clamp16((vol[0] * wet + 0x4000) >> 15);
-        gains[3] = clamp16((vol[1] * wet + 0x4000) >> 15);
+        value[0] = v0;
+        let v1 = value[1] + step[1];
+        if (step[1] <= 0 ? v1 <= tgt[1] : v1 >= tgt[1]) {
+          v1 = tgt[1];
+          step[1] = 0;
+        }
+        value[1] = v1;
+        lanes[x] = v0 | 0;
+        lanes[8 + x] = v1 | 0;
+        const vol0 = (v0 | 0) >> 16;
+        const vol1 = (v1 | 0) >> 16;
         const src = this.s16(inp + ptr * 2);
-        for (let b = 0; b < nb; b++) {
-          const a = outs[b] + ptr * 2;
-          this.w16(a, clamp16(this.s16(a) + ((src * gains[b] + 0x4000) >> 15)));
+        const o = ptr * 2;
+        let a = outs[0] + o;
+        this.w16(a, clamp16(this.s16(a) + ((src * clamp16((vol0 * dry + 0x4000) >> 15) + 0x4000) >> 15)));
+        a = outs[1] + o;
+        this.w16(a, clamp16(this.s16(a) + ((src * clamp16((vol1 * dry + 0x4000) >> 15) + 0x4000) >> 15)));
+        if (nb === 4) {
+          a = outs[2] + o;
+          this.w16(a, clamp16(this.s16(a) + ((src * clamp16((vol0 * wet + 0x4000) >> 15) + 0x4000) >> 15)));
+          a = outs[3] + o;
+          this.w16(a, clamp16(this.s16(a) + ((src * clamp16((vol1 * wet + 0x4000) >> 15) + 0x4000) >> 15)));
         }
         ptr++;
       }

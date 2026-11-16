@@ -476,6 +476,8 @@ export class Vr4300 {
   // ---- 実行 ----
   run(): void {
     const b = this.bus;
+    // 1 つ前の命令のすぐ次のアドレス（ここと違う所に来たら「飛んできた」＝ブロックの入口）
+    let seq = -1;
     while (b.cycles < b.stopAt) {
       if (this.intReady) {
         this.curPc = this.pc;
@@ -484,16 +486,20 @@ export class Vr4300 {
         continue;
       }
       const jit = this.jit;
+      const pc = this.pc;
       if (jit !== null && !this.branched) {
-        const blk = jit.get(this.pc);
+        // 入口では通った回数を数え、よく通る所だけ関数にする。続きで来た所は、もう関数があれば使う
+        const blk = pc === seq ? jit.peek(pc) : jit.get(pc);
         if (blk !== null) {
           blk(this);
           this.lo[0] = 0;
           this.hi[0] = 0;
+          seq = -1;
           continue;
         }
       }
       this.step();
+      seq = (pc + 4) | 0;
     }
   }
 

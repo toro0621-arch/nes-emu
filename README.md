@@ -112,7 +112,7 @@ ROM とセーブデータは端末の中（IndexedDB）にだけ保存し、ど�
 | `test/ws.test.ts` | ワンダースワン：テスト用のプログラムをその場で組み立てて、割り込み・画面・ボタン・縦持ち・セーブを確かめる |
 | `test/dsp1.test.ts` | DSP-1：かけ算・sin と cos・回転・逆数、投影して戻すと元の地面の点になるか、モード 7 の係数と画面→地面の変換が合うか |
 | `src/psx/` | プレイステーション。`cpu.ts`（R3000A）、`gte.ts`、`gpu.ts`、`spu.ts`、`cdrom.ts`（ドライブ）、`disc.ts`（.cue・.bin・.iso を少しずつ読む）、`mdec.ts`、`timers.ts`、`sio.ts`（コントローラー・メモリーカード）、`psx.ts`（メモリの並び・DMA・割り込み・1 フレームの流れ）、`load.ts`（ファイルの見分けと BIOS） |
-| `src/n64/` | NINTENDO64。`cpu.ts`（VR4300）、`rsp.ts`、`audiohle.ts`（標準の音声マイクロコードを直接処理）、`rdp.ts`、`n64.ts`（メモリの並び・割り込み・画面・音・カートリッジ・コントローラー・セーブ・1 フレームの流れ） |
+| `src/n64/` | NINTENDO64。`cpu.ts`（VR4300）、`rsp.ts`、`audiohle.ts`（標準の音声マイクロコードを直接処理）、`rdp.ts`、`rdpjit.ts`（描く設定ごとに、1 ドットを描くループを JavaScript の関数として組み立てる）、`n64.ts`（メモリの並び・割り込み・画面・音・カートリッジ・コントローラー・セーブ・1 フレームの流れ） |
 | `test/n64.test.ts` | NINTENDO64：ROM の形式、PeterLemon さんの CPU・RSP のテスト、3D のデモとどこでもセーブ、音声マイクロコードの直接処理 |
 | `test/cheats.test.ts` | 改造コード：各形式の読み取り、毎フレームの書き込みと条件つきのコード |
 | `test/psx.test.ts` | プレイステーション：GTE の計算、PeterLemon さんの CPU・GTE のテスト、手作りの CD から互換 BIOS で起動、どこでもセーブ |
