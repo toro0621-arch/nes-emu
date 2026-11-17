@@ -158,6 +158,12 @@ export class N64 implements N64Bus {
   frame = 0;
   /** このフレームは絵を描かない（重いときに間引く） */
   skipDraw = false;
+  /** 外から頼まれた「処理が追いつかないので、絵を省いてよい」（省くのは絵のタスクまるごと＝rsp.ts の skipGfx） */
+  skipWanted = false;
+  /** 最後に終わった絵のタスクは省いた（その画面は描かれていない） */
+  gfxSkipped = false;
+  /** 今の表示先の画面は描かれている（省いた画面は表示しないで、前の絵のままにする） */
+  private present = true;
 
   constructor(rom: Uint8Array, useJit = true) {
     const r = normalizeRom(rom);
@@ -395,6 +401,8 @@ export class N64 implements N64Bus {
           this.lower(INT_VI);
           return;
         }
+        // ゲームが表示先を切り替えた：直前の絵のタスクを省いていたら、その画面には何も描かれていない
+        if (r === 1 && ((v ^ this.vi[1]) & 0xffffff) !== 0) this.present = !this.gfxSkipped;
         this.vi[r] = v;
         return;
       }
@@ -814,7 +822,7 @@ export class N64 implements N64Bus {
       this.viLine = (l & ~1) | this.viField;
       if ((l & ~1) === (intr & ~1) && !(l & 1)) {
         this.raise(INT_VI);
-        if (!this.skipDraw) this.render();
+        if (this.present) this.render();
       }
       const end = start + Math.floor(((l + 1) * frameCycles) / lines);
       while (this.cycles < end) {

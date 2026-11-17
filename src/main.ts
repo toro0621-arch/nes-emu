@@ -1253,6 +1253,8 @@ function decimate(samples: Float32Array, n: number): Float32Array {
 }
 
 // 画面のリフレッシュレート（60Hz / 120Hz など）に関係なく、NES の 60.1fps で進める
+/** 1 回の画面更新（60Hz で 16.7ms）のうち、ゲームを進めるのに使う時間の目安 */
+const FRAME_BUDGET = 15;
 let acc = 0;
 let last = performance.now();
 let frames = 0;
@@ -1267,11 +1269,14 @@ function loop(now: number): void {
     const FRAME_MS = 1000 / machine.fps;
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);
     // 絵を間引ける本体は、遅れているときは最後の 1 フレームだけ描く
-    // NINTENDO64 は、前の絵に重ねて描くゲーム（文字を 1 文字ずつ足す・残像）があり、早送りで絵を省くと文字がちらつくので、早送りでは省かない
-    const canSkip = !!machine.setSkip && !(fastForward && machine.system === 'n64');
+    const canSkip = !!machine.setSkip;
     let ran = false;
     // 半フレーム分たまったら 1 フレーム進める（60Hz 画面で毎回 1 フレームになるように）
     let rewound = false;
+    // 1 回の画面更新で使ってよい時間。処理が重くて追いつかないとき（特に早送り）に、
+    // たまったぶんを一気に進めようとすると画面がたまにしか変わらずカクカクするので、時間で区切って残りは捨てる
+    const began = performance.now();
+    let cost = 0;
     while (acc >= FRAME_MS / 2) {
       if (rewind.active) {
         // 巻き戻し中：ふつうの速さで、前の状態を順に見せる
@@ -1282,14 +1287,21 @@ function loop(now: number): void {
         ran = true;
         continue;
       }
+      const t0 = performance.now();
+      if (ran && t0 - began + cost > FRAME_BUDGET) {
+        acc = Math.min(acc, FRAME_MS / 2);
+        break;
+      }
       machine.setButtons(touch.read() | keyboard.read());
       if (cheats.active && machine.poke) cheats.apply(machine as unknown as CheatTarget);
+      // このあとまだ進めるフレームがあるなら、このフレームの絵は省く
       if (machine.setSkip) machine.setSkip(canSkip && acc >= FRAME_MS * 1.5);
       machine.runFrame();
       rewind.record(machine);
       acc -= FRAME_MS;
       frames++;
       ran = true;
+      cost = performance.now() - t0;
     }
     // プレイステーションは画面の大きさが変わる
     if (ran && image.data.buffer !== machine.frameBuffer.buffer) bindScreen(machine);

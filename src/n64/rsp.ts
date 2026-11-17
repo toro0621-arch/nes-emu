@@ -2,7 +2,7 @@
 // ゲームが自分で持ってきたプログラム（マイクロコード）をそのまま 1 命令ずつ実行する。
 // こうしておくと、ゲームごとに違うマイクロコードを 1 つずつ作り直さなくても動く
 
-import { INT_SP, type N64 } from './n64';
+import { INT_SP, INT_DP, type N64 } from './n64';
 import { RspJit } from './rspjit';
 import { AudioHle } from './audiohle';
 
@@ -76,6 +76,10 @@ export class Rsp {
   private fresh = false;
   /** 音のタスクを処理し終え、終わったことを知らせるのを待っている */
   private hleWait = false;
+  /** 終わりを知らせるときに、RDP の「描き終わり」の割り込みも出す（絵のタスクをまるごと省いたとき） */
+  private hleDp = false;
+  /** 絵のタスクを続けて省いた回数 */
+  private skipRun = 0;
   imem32(): Int32Array {
     return this.mem32;
   }
@@ -183,6 +187,7 @@ export class Rsp {
       this.lastRun = this.n64.cycles;
       this.fresh = true;
       this.hleWait = false;
+      this.hleDp = false;
       this.nextAt = this.n64.cycles + 200;
       if (this.n64.stopAt > this.nextAt) this.n64.stopAt = this.nextAt;
     }
@@ -231,19 +236,47 @@ export class Rsp {
     if (this.hleWait) {
       // マイクロコードと同じ終わり方（「タスク終わり」の合図 sig2 を立てて BREAK）
       this.hleWait = false;
+      if (this.hleDp) {
+        this.hleDp = false;
+        this.n64.raise(INT_DP);
+      }
       this.status |= 0x203;
       if (this.status & 0x40) this.n64.raise(INT_SP);
       return;
     }
     if (this.fresh) {
       this.fresh = false;
-      if (this.hle !== null && this.runHle()) return;
+      if (this.skipGfx() || (this.hle !== null && this.runHle())) return;
     }
     const now = this.n64.cycles;
     const budget = Math.max(2000, Math.min(300000, Math.floor(((now - this.lastRun) * 2) / 3)));
     this.lastRun = now;
     this.run(budget);
     if (!(this.status & 1)) this.nextAt = this.n64.cycles + 3000;
+  }
+
+  /**
+   * 処理が追いつかないとき・早送りのときは、絵のタスク（1 画面ぶんの絵を描く仕事）をまるごと省く。
+   * RSP も RDP も動かさず、「終わった」ことだけゲームに知らせる。省いた画面は表示しない（n64.ts）。
+   * 1 画面の途中から省くと絵が欠けるので、省くのはいつもタスク 1 つまるごと。続けて省くのは 2 回まで
+   */
+  private skipGfx(): boolean {
+    const t = 0xfc0 >> 2;
+    if (this.mem32[t] !== 1 || this.pc !== 0) return false;
+    const n = this.n64;
+    // 中断したタスクの続き（flags の YIELDED）は、前半を描いているので省かない
+    if (!n.skipWanted || this.mem32[t + 1] & 1 || this.skipRun >= 2) {
+      this.skipRun = 0;
+      n.gfxSkipped = false;
+      return false;
+    }
+    this.skipRun++;
+    n.gfxSkipped = true;
+    this.hleWait = true;
+    this.hleDp = true;
+    this.nextAt = n.cycles + 60000;
+    if (n.stopAt > this.nextAt) n.stopAt = this.nextAt;
+    return true;
   }
 
   /** 音のタスクなら JavaScript で処理して終わらせる */

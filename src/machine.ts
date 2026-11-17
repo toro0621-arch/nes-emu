@@ -823,7 +823,7 @@ class N64Machine implements Machine {
     this.n64.runFrame();
   }
   setSkip(on: boolean) {
-    this.n64.skipDraw = on;
+    this.n64.skipWanted = on;
   }
   setButtons(b: number) {
     this.pad = b;
