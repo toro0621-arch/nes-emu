@@ -374,6 +374,34 @@ function hideToast(): void {
 // お知らせを押すと（ボタン以外のところ）すぐ消える
 toast.addEventListener('click', hideToast);
 
+/**
+ * ファイルをダウンロードフォルダに保存する。
+ * ホーム画面に置いたアプリ（PWA）だと、ブラウザによってはダウンロードが黙って止まることがあるので、
+ * 「共有」からも保存できるようにする（共有の画面で「ファイルに保存」や Google ドライブなどを選べる）
+ */
+function saveFile(data: BlobPart, name: string, done: string): void {
+  // 中身の形式を JSON にすると、ブラウザが保存せずに画面に開いてしまうことがあるので、ただのデータとして渡す
+  const blob = new Blob([data], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.rel = 'noopener';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // 大きいファイル（64 は 10MB 近い）は書き込みに時間がかかるので、すぐには捨てない
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+  const file = new File([blob], name, { type: 'application/octet-stream' });
+  const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
+  if (nav.share && nav.canShare?.({ files: [file] })) {
+    showToast(`${done}。ダウンロードに無いときは「共有」から保存してね`, {
+      label: '共有',
+      run: () => void nav.share({ files: [file], title: name }).catch(() => {}),
+    });
+  } else showToast(done);
+}
+
 // ---- PWA（オフライン対応・更新） ----
 const updateSW = registerSW({
   onNeedRefresh() {
@@ -528,15 +556,7 @@ $('sav-export').addEventListener('click', () => {
   const ram = machine?.saveRam;
   if (!ram || !currentRom) return;
   void flushSave();
-  const url = URL.createObjectURL(new Blob([ram.slice()], { type: 'application/octet-stream' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${baseName(currentRom.name)}.sav`;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-  showToast('セーブデータを書き出しました');
+  saveFile(ram.slice(), `${baseName(currentRom.name)}.sav`, 'セーブデータを書き出しました');
 });
 savFile.addEventListener('change', async () => {
   const file = savFile.files?.[0];
@@ -938,15 +958,7 @@ async function renderSlots(): Promise<void> {
 function exportState(slot: number, saved: { time: number; thumb: string; state: unknown }): void {
   if (!currentRom) return;
   const text = stateToJson(saved.state, { game: currentRom.name, time: saved.time, thumb: saved.thumb });
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${baseName(currentRom.name)}-slot${slot}.state.json`;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-  showToast('どこでもセーブをファイルに書き出しました');
+  saveFile(text, `${baseName(currentRom.name)}-slot${slot}.state.json`, 'どこでもセーブをファイルに書き出しました');
 }
 $<HTMLInputElement>('state-file').addEventListener('change', async (e) => {
   const input = e.target as HTMLInputElement;
