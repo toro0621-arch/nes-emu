@@ -429,7 +429,9 @@ const updateSW = registerSW({
 });
 
 resetButton.addEventListener('click', () => {
-  if (machine) {
+  if (machine && confirm('ゲームをリセットして最初から始めます。ゲームの中でセーブしたデータは消えません。よろしいですか？')) {
+    // まだ保存していないゲーム内のセーブを先に保存しておく
+    void flushSave();
     machine.reset();
     applyCheats();
     bindScreen(machine);
