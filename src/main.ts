@@ -165,11 +165,13 @@ async function startRom(
   files?: DiscFile[],
   knownId?: string,
   cardId?: string,
+  fresh = false,
 ): Promise<{ loadedSave: boolean; resumed?: boolean } | null> {
   if (currentRom && currentRom.data === data && !files) return { loadedSave: false };
   if (files && knownId && knownId === currentId) return { loadedSave: false };
   await flushSave(); // 前の ROM のセーブを書き出しておく
-  await autoSave(); // 前の ROM の続き
+  // 前の ROM の続き（セーブデータを読み込んで始め直すときは、古いセーブの入った続きを作らない）
+  if (!fresh) await autoSave();
   let next: Machine;
   let discKey: string | null = null;
   try {
@@ -232,6 +234,12 @@ async function startRom(
   acc = 0;
   keepScreenOn(true);
   rewind.clear();
+  if (fresh) {
+    // 続きの状態にはセーブデータも入っているので、そこから再開すると読み込んだセーブが古いものに戻ってしまう。
+    // 再開しないで、今の（読み込んだセーブの入った）状態で続きを作り直す
+    await autoSave();
+    return { loadedSave };
+  }
   // 前に遊んだところの続きがあれば、そこから
   const resumed = await autoLoad(next, id);
   return { loadedSave, resumed };
@@ -584,7 +592,14 @@ savFile.addEventListener('change', async () => {
   m.saveDirty = false;
   currentRom = null;
   currentId = null;
-  const started = await startRom(rom.name, rom.data, currentFiles ?? undefined, currentFiles ? gameId : undefined, id !== gameId ? id : undefined);
+  const started = await startRom(
+    rom.name,
+    rom.data,
+    currentFiles ?? undefined,
+    currentFiles ? gameId : undefined,
+    id !== gameId ? id : undefined,
+    true,
+  );
   closeMenu();
   showToast(started?.loadedSave ? 'セーブデータを読み込みました' : 'セーブデータを読み込めませんでした');
 });
