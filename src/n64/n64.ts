@@ -20,6 +20,30 @@ export const INT_DP = 5;
 export const SAVE_SIZE = 0x20000 + 0x800;
 const EEP_OFF = 0x20000;
 
+/** RetroArch（mupen64plus）の .srm の大きさ：EEPROM 2KB・コントローラーパック 128KB・SRAM 32KB・フラッシュ 128KB の順 */
+export const SRM_SIZE = 0x800 + 0x20000 + 0x8000 + 0x20000;
+
+/**
+ * RetroArch の .srm を、このエミュのセーブデータの並びに直す（大きさが違えば null）。
+ * SRAM とフラッシュは 4 バイトずつ逆の並びで入っているので、並べ直す
+ */
+export function fromRetroArchSrm(srm: Uint8Array, current: Uint8Array): Uint8Array | null {
+  if (srm.length !== SRM_SIZE) return null;
+  const out = current.slice();
+  const swapped = (from: number, len: number) => {
+    const r = new Uint8Array(len);
+    for (let i = 0; i < len; i++) r[i] = srm[from + (i ^ 3)];
+    return r;
+  };
+  const used = (from: number, len: number, empty: number) => srm.subarray(from, from + len).some((b) => b !== empty);
+  const SRAM = 0x20800;
+  const FLASH = 0x28800;
+  if (used(FLASH, 0x20000, 0xff)) out.set(swapped(FLASH, 0x20000), 0);
+  else if (used(SRAM, 0x8000, 0)) out.set(swapped(SRAM, 0x8000), 0);
+  if (used(0, 0x800, 0xff)) out.set(srm.subarray(0, 0x800), EEP_OFF);
+  return out;
+}
+
 /** EEPROM が 16K のゲーム（カートリッジの ID の 2〜3 文字目）。それ以外は 4K として答える */
 const EEP16K = new Set(['YS', 'B7', 'FU', 'DO', 'PD', 'MV', 'MX', 'K4', 'M8', 'EP', 'CW', 'CZ', 'D6', 'R7', 'P3', 'IJ', 'N6', 'UB', 'KJ', 'GV', '3D', 'RZ', 'D2', 'JF', 'XO', 'B5']);
 

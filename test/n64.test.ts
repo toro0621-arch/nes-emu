@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createMachine, detectSystem } from '../src/machine';
-import { N64, isN64Rom, normalizeRom } from '../src/n64/n64';
+import { N64, isN64Rom, normalizeRom, fromRetroArchSrm, SRM_SIZE, SAVE_SIZE } from '../src/n64/n64';
 import { AudioHle } from '../src/n64/audiohle';
 
 const ROMS = join(__dirname, 'roms', 'n64');
@@ -93,5 +93,15 @@ describe('NINTENDO64', () => {
     });
     new AudioHle(fake as never).run(0x3000, list.length * 8, 0x8000);
     for (let i = 0; i < 16; i++) expect(r16(0x2000 + i * 2)).toBe(((i - 8) * 1000) >> 1);
+  });
+
+  it('RetroArch の .srm から SRAM を取り出す（4 バイトずつ並べ直す）', () => {
+    const srm = new Uint8Array(SRM_SIZE);
+    srm.fill(0xff, 0, 0x800);
+    srm.fill(0xff, 0x28800);
+    srm.set([0x36, 0x57, 0x52, 0x53, 0x00, 0x33, 0x56, 0x34], 0x20800);
+    const out = fromRetroArchSrm(srm, new Uint8Array(SAVE_SIZE))!;
+    expect(String.fromCharCode(...out.subarray(0, 7))).toBe('SRW64V3');
+    expect(fromRetroArchSrm(new Uint8Array(100), new Uint8Array(SAVE_SIZE))).toBe(null);
   });
 });

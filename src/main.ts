@@ -30,6 +30,7 @@ import {
   type LibraryEntry,
 } from './storage';
 import { SmoothScreen, type SmoothMode } from './smooth';
+import { fromRetroArchSrm } from './n64/n64';
 import { keepScreenOn } from './wakelock';
 
 
@@ -568,9 +569,11 @@ savFile.addEventListener('change', async () => {
   if (!file || !m?.saveRam || !rom || !id || !gameId) return;
   if (!confirm(`「${baseName(rom.name)}」のいまのセーブデータを、読み込むファイルで上書きして、ゲームを最初から始めます。よろしいですか？`)) return;
   const bytes = new Uint8Array(await file.arrayBuffer());
+  // NINTENDO64 は RetroArch の .srm もそのまま読めるようにする（中の並びが違うので直す）
+  const srm = m.system === 'n64' ? fromRetroArchSrm(bytes, m.saveRam) : null;
   // ファイルが短ければ足りないところはいまのまま、長ければ余りは使わない
-  const next = m.saveRam.slice();
-  next.set(bytes.subarray(0, next.length));
+  const next = srm ?? m.saveRam.slice();
+  if (!srm) next.set(bytes.subarray(0, next.length));
   if (!(await saveSram(id, next))) {
     showToast('セーブデータを保存できませんでした');
     return;
