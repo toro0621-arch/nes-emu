@@ -412,10 +412,11 @@ function saveFile(data: BlobPart, name: string, done: string): void {
 }
 
 // ---- PWA（オフライン対応・更新） ----
+declare const __BUILD__: string;
+const showUpdate = () => showToast('新しいバージョンがあります', { label: '更新', run: () => void updateSW(true), sticky: true });
+let swReg: ServiceWorkerRegistration | undefined;
 const updateSW = registerSW({
-  onNeedRefresh() {
-    showToast('新しいバージョンがあります', { label: '更新', run: () => void updateSW(true), sticky: true });
-  },
+  onNeedRefresh: showUpdate,
   onOfflineReady() {
     showToast('オフラインでも使えるようになりました');
   },
@@ -423,8 +424,14 @@ const updateSW = registerSW({
   // スマホのアプリは裏に置いたまま使い続けることが多いので、前に出てきたときと 30 分ごとにも調べる
   onRegisteredSW(_url, reg) {
     if (!reg) return;
-    let last = Date.now();
+    swReg = reg;
+    let last = 0;
     const check = () => {
+      // 前に「更新」を出したのに押さなかったときは、もう一度出す（新しい版は待っているので、調べ直しても知らせが来ない）
+      if (reg.waiting) {
+        showUpdate();
+        return;
+      }
       if (!navigator.onLine || Date.now() - last < 60_000) return;
       last = Date.now();
       void reg.update().catch(() => {});
@@ -434,6 +441,28 @@ const updateSW = registerSW({
     });
     setInterval(check, 30 * 60_000);
   },
+});
+
+// メニューの「更新を確認」
+const versionLabel = document.getElementById('version');
+if (versionLabel) versionLabel.textContent = `いまの版：${typeof __BUILD__ === 'string' ? __BUILD__ : '（開発中）'}`;
+document.getElementById('check-update')?.addEventListener('click', async () => {
+  const reg = swReg;
+  if (!reg) {
+    location.reload();
+    return;
+  }
+  showToast('新しい版を調べています…');
+  try {
+    await reg.update();
+  } catch {
+    showToast('調べられませんでした（ネットにつながっているか確かめてね）');
+    return;
+  }
+  // 見つかったら、ダウンロードが終わるのを少し待つ
+  for (let i = 0; i < 20 && reg.installing; i++) await new Promise((r) => setTimeout(r, 250));
+  if (reg.waiting) void updateSW(true);
+  else showToast('いまの版が最新です');
 });
 
 resetButton.addEventListener('click', () => {

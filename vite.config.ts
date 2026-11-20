@@ -4,6 +4,12 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
   // どの URL の下に置いても動くように相対パス
   base: './',
+  // 画面に出す版（作った日時）。更新できたか分かるように
+  define: {
+    __BUILD__: JSON.stringify(
+      new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    ),
+  },
   plugins: [
     VitePWA({
       // ゲーム中に勝手に再読み込みしないよう、新しい版があったら画面上で知らせて押してもらう
