@@ -59,6 +59,8 @@ export function blankCard(): Uint8Array {
 const BYTE_CYCLES = 1088;
 /** ACK（次のバイトをどうぞ）の合図が来るまで */
 const ACK_CYCLES = 1088 + 340;
+/** /ACK の合図の長さ（クロック） */
+const ACK_PULSE = 100;
 
 export class Sio {
   buttons = 0;
@@ -72,7 +74,8 @@ export class Sio {
   baud = 0;
   private rx = 0xff;
   private rxFull = false;
-  private ack = false;
+  /** /ACK が出ている（低い）間の終わりの時刻。本物は 100 クロックくらいの短い合図で、すぐ戻る */
+  private ackUntil = -1;
   private irq = false;
   /** 今話している相手：0 なし、1 パッド、2 メモリーカード、3 だれも答えない */
   private dev = 0;
@@ -84,6 +87,7 @@ export class Sio {
   private wbuf = new Uint8Array(128);
   /** 返事が届く時刻（CPU のクロック。-1 = なし） */
   pendingAt = -1;
+  private pendingAt0 = 0;
   private pendingByte = 0xff;
   private pendingAck = false;
 
@@ -95,7 +99,7 @@ export class Sio {
   get stat(): number {
     let s = 0x5; // 送れる・送り終わった
     if (this.rxFull) s |= 0x2;
-    if (this.ack) s |= 0x80;
+    if (this.ackUntil >= 0 && this.now() < this.ackUntil) s |= 0x80;
     if (this.irq) s |= 0x200;
     return s;
   }
@@ -134,11 +138,13 @@ export class Sio {
   /** 時刻が来たら返事を受け取る */
   tick(): void {
     if (this.pendingAt < 0 || this.now() < this.pendingAt) return;
+    this.pendingAt0 = this.pendingAt;
     this.pendingAt = -1;
     this.rx = this.pendingByte;
     this.rxFull = true;
     if (this.pendingAck) {
-      this.ack = true;
+      // BIOS は「/ACK が戻るまで待つ」ことがあるので、出しっぱなしにしない
+      this.ackUntil = this.pendingAt0 + ACK_PULSE;
       if (this.ctrl & 0x1000) {
         this.irq = true;
         this.raiseIrq();
@@ -151,7 +157,6 @@ export class Sio {
     if (v & 0x10) {
       // 割り込みの印を消す
       this.irq = false;
-      this.ack = false;
     }
     if (v & 0x40) {
       this.ctrl = 0;
