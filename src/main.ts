@@ -32,6 +32,7 @@ import {
 } from './storage';
 import { SmoothScreen, type SmoothMode } from './smooth';
 import { fromRetroArchSrm } from './n64/n64';
+import { TimeStretch } from './audio/stretch';
 import { keepScreenOn } from './wakelock';
 
 
@@ -916,6 +917,7 @@ async function openMenu(): Promise<void> {
   renderSram();
   renderSmooth();
   renderFfSpeeds();
+  renderFfSound();
   void renderBios();
   renderPsxSettings();
   renderCheats();
@@ -1319,7 +1321,46 @@ function renderFfSpeeds(): void {
   }
 }
 
-/** 早送り中の音は、間引いて高く速く鳴らす */
+// ---- 早送り中の音 ----
+type FfSound = 'pitch' | 'fast' | 'mute';
+const FF_SOUND_KEY = 'nes-emu:ff-sound';
+const FF_SOUNDS: [FfSound, string][] = [
+  ['pitch', '高さそのまま'],
+  ['fast', '高く速く'],
+  ['mute', '消す'],
+];
+let ffSound: FfSound = 'pitch';
+try {
+  const v = localStorage.getItem(FF_SOUND_KEY);
+  if (v === 'pitch' || v === 'fast' || v === 'mute') ffSound = v;
+} catch {
+  // 無視
+}
+const stretch = new TimeStretch();
+function renderFfSound(): void {
+  const el = $('ff-sound');
+  el.replaceChildren();
+  for (const [v, label] of FF_SOUNDS) {
+    el.append(
+      button(
+        label,
+        () => {
+          ffSound = v;
+          stretch.reset();
+          try {
+            localStorage.setItem(FF_SOUND_KEY, v);
+          } catch {
+            // 無視
+          }
+          renderFfSound();
+        },
+        'btn' + (v === ffSound ? ' accent' : ''),
+      ),
+    );
+  }
+}
+
+/** 早送り中の音（「高く速く」のとき）は、間引いて高く速く鳴らす */
 function decimate(samples: Float32Array, n: number): Float32Array {
   // 左・右が交互に並んでいるので、1 組ずつ縮める（1.5 倍などの半端な速さにも対応）。
   // 1 つおきに拾うだけだとザラザラした音になるので、まとめる範囲の平均をとる
@@ -1409,8 +1450,11 @@ function loop(now: number): void {
         // 届いていないのに倍率どおり縮めると、音が足りなくなって途切れ途切れになる
         const actual = Math.min(speed, Math.max(1, (ranCount * FRAME_MS) / Math.max(1, dt)));
         ffRatio = ffRatio * 0.8 + actual * 0.2;
-        audio.push(decimate(samples, ffRatio));
+        if (ffSound === 'pitch') audio.push(stretch.process(samples, ffRatio));
+        else if (ffSound === 'mute') audio.push(new Float32Array(Math.floor(samples.length / 2 / ffRatio) * 2));
+        else audio.push(decimate(samples, ffRatio));
       } else {
+        if (ffRatio !== 1) stretch.reset();
         ffRatio = 1;
         audio.push(samples);
       }
