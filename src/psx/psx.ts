@@ -417,8 +417,10 @@ export class Psx implements PsxBus {
     }
     if (p === 0x1f8010f4) {
       // 下位：書き換え。24〜30 ビット：1 を書くと消える
+      // 31 ビット（割り込みの合図）は読むだけ。書いたあとも、もともと立っていたかを覚えておく
+      // （割り込みは 0 → 1 に変わったときだけ。立ったままなのに書くたびに割り込むと、割り込みが止まらなくなる）
       const flags = (this.dicr & ~(v & 0x7f000000)) & 0x7f000000;
-      this.dicr = ((v & 0x00ff803f) | flags) >>> 0;
+      this.dicr = ((v & 0x00ff803f) | flags | (this.dicr & 0x80000000)) >>> 0;
       this.updateDicr(false);
       return;
     }
