@@ -2,6 +2,7 @@
 // 分岐の次の 1 命令（遅延スロット）と、ロードした値が 1 命令遅れて届く（ロード遅延）ところまで実機どおりに動かす
 
 import type { Gte } from './gte';
+import { PsxJit } from './jit';
 
 export interface PsxBus {
   /** 経過したクロック（33.8688MHz） */
@@ -55,6 +56,8 @@ export class R3000 {
   private idlePc = -1;
   private idleSnap = new Int32Array(34);
   idleWrites = 0;
+  /** 命令を JavaScript の関数にして速く動かす仕組み（null = いつもインタープリター） */
+  jit: PsxJit | null = null;
 
   constructor(
     public bus: PsxBus & { writes: number; volatileRead: boolean },
@@ -98,6 +101,8 @@ export class R3000 {
   /** bus.stopAt まで実行する */
   run(): void {
     const b = this.bus;
+    // 1 つ前の命令のすぐ次のアドレス（ここと違う所に来たら「飛んできた」＝ブロックの入口）
+    let seq = -1;
     while (b.cycles < b.stopAt) {
       // 割り込み
       if (b.irqPending) this.cause |= 0x400;
@@ -110,10 +115,27 @@ export class R3000 {
         if (next >>> 25 === 0x25) this.gte.command(next);
         this.flushLoad();
         this.exception(EXC_INT);
+        seq = -1;
         continue;
       }
-      if (this.pc === b.hookPc) b.onHook();
+      const pc = this.pc;
+      if (pc === b.hookPc) b.onHook();
+      const jit = this.jit;
+      // 分岐の遅延スロットの途中・キャッシュを切り離しているとき・EXE を差し込む前は、インタープリターで
+      if (jit !== null && !this.branched && !(this.sr & 0x10000) && b.hookPc === -1) {
+        const blk = pc === seq ? jit.peek(pc) : jit.get(pc);
+        if (blk !== null) {
+          const before = b.cycles;
+          blk(this);
+          // 次の出来事までに終われないブロックは、何もしないで戻ってくる
+          if (b.cycles !== before || this.pc !== pc) {
+            seq = -1;
+            continue;
+          }
+        }
+      }
       this.step();
+      seq = (pc + 4) | 0;
     }
   }
 
@@ -155,7 +177,7 @@ export class R3000 {
     if (back >= 0 && back <= 32) this.checkIdle(target);
   }
 
-  private checkIdle(target: number): void {
+  checkIdle(target: number): void {
     const b = this.bus;
     const s = this.idleSnap;
     const r = this.r;
@@ -623,6 +645,7 @@ export class R3000 {
 
   /** リセット・EXE を読み込んだときに PC を決める */
   jump(pc: number): void {
+    this.jit?.clear();
     this.pc = pc | 0;
     this.nextPc = (pc + 4) | 0;
     this.branched = false;

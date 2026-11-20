@@ -46,7 +46,7 @@ class Voice {
   addr = 0;
   counter = 0;
   phase = Phase.Off;
-  private wait = 0;
+  wait = 0;
   /** ほどいたサンプル（前の 3 つ + 28） */
   buf = new Int16Array(31);
   old = 0;
@@ -69,6 +69,12 @@ class Voice {
 
   needBlock = true;
 
+  /** 鍵盤を離した：音が消えていく段階へ。前の段階の待ち時間は持ち越さない（サステインは待ちがとても長いので、持ち越すと音が消えない） */
+  keyOff(): void {
+    this.phase = Phase.Release;
+    this.wait = 0;
+  }
+
   /** ADSR を 1 サンプル進める */
   envelope(): void {
     if (this.phase === Phase.Off) return;
@@ -87,7 +93,8 @@ class Voice {
       case Phase.Decay:
         exp = true;
         dec = true;
-        shift = ((lo >> 4) & 15) * 4;
+        // 減る速さ：4 ビットの値がそのままシフト量（4 倍しない。4 倍すると音がほとんど減らない）
+        shift = (lo >> 4) & 15;
         step = -8;
         break;
       case Phase.Sustain:
@@ -99,10 +106,13 @@ class Voice {
       case Phase.Release:
         exp = (hi & 0x20) !== 0;
         dec = true;
-        shift = (hi & 31) * 4;
+        // 離したあとの減る速さ：5 ビットの値がそのままシフト量（4 倍すると音が消えず、鳴りっぱなしになる）
+        shift = hi & 31;
         step = -8;
         break;
     }
+    // 前の版で作ったセーブには、ありえないほど長い待ち（音が消えない）が入っていることがあるので直す
+    if (this.phase === Phase.Release && this.wait > 1 << Math.max(0, (this.adsrHi & 31) - 11)) this.wait = 0;
     if (this.wait > 0) {
       this.wait--;
       return;
@@ -332,7 +342,7 @@ export class Spu {
       if (on) {
         v.keyOn();
         this.endx &= ~(1 << (base + i));
-      } else if (v.phase !== Phase.Off) v.phase = Phase.Release;
+      } else if (v.phase !== Phase.Off && v.phase !== Phase.Release) v.keyOff();
     }
   }
 

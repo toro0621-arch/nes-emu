@@ -2,6 +2,7 @@
 
 import { Cdrom } from './cdrom';
 import { R3000, type PsxBus } from './cpu';
+import { PsxJit } from './jit';
 import type { Disc } from './disc';
 import { Gpu } from './gpu';
 import { Gte } from './gte';
@@ -69,6 +70,7 @@ export class Psx implements PsxBus {
     this.bios32 = new Int32Array(this.bios.buffer);
     const now = () => this.cycles;
     this.cpu = new R3000(this, this.gte);
+    this.cpu.jit = new PsxJit(this.cpu);
     this.timers = new PsxTimers(now, (n) => this.raise(n));
     this.cdrom = new Cdrom(now, () => this.raise(2));
     this.cdrom.biosRegion = biosRegion(this.bios);
@@ -165,6 +167,7 @@ export class Psx implements PsxBus {
     const p = a & 0x1fffffff;
     if (p < 0x800000) {
       this.ram32[(p & 0x1fffff) >> 2] = v;
+      if (this.cpu.jit?.codePages[(p & 0x1fffff) >> 12]) this.cpu.jit.invalidate(p);
       return;
     }
     if (p >= 0x1f800000 && p < 0x1f800400) {
@@ -183,6 +186,7 @@ export class Psx implements PsxBus {
     const p = a & 0x1fffffff;
     if (p < 0x800000) {
       this.ram16[(p & 0x1fffff) >> 1] = v;
+      if (this.cpu.jit?.codePages[(p & 0x1fffff) >> 12]) this.cpu.jit.invalidate(p);
       return;
     }
     if (p >= 0x1f800000 && p < 0x1f800400) {
@@ -197,6 +201,7 @@ export class Psx implements PsxBus {
     const p = a & 0x1fffffff;
     if (p < 0x800000) {
       this.ram[p & 0x1fffff] = v;
+      if (this.cpu.jit?.codePages[(p & 0x1fffff) >> 12]) this.cpu.jit.invalidate(p);
       return;
     }
     if (p >= 0x1f800000 && p < 0x1f800400) {
@@ -491,6 +496,11 @@ export class Psx implements PsxBus {
     if (sync === 0) words = this.bcr[ch] & 0xffff || 0x10000;
     else words = (this.bcr[ch] & 0xffff || 0x10000) * (this.bcr[ch] >>> 16);
     this.cycles += words;
+    // メモリに書く転送なら、そこにあるプログラムの関数を捨てる（CD から読んだプログラムなど）
+    if (this.cpu.jit && (ch === 1 || ch === 3 || ch === 6 || (toRam && (ch === 2 || ch === 4)))) {
+      const from = step > 0 ? addr : (addr - (words - 1) * 4) & 0x1ffffc;
+      this.cpu.jit.invalidateRange(from, words * 4);
+    }
     for (let i = 0; i < words; i++) {
       const a = addr >> 2;
       switch (ch) {
@@ -580,6 +590,7 @@ export class Psx implements PsxBus {
       this.spu.run(this.cycles);
     }
     this.frame++;
+    this.cpu.jit?.tick();
   }
 
   stateSkip(): unknown[] {

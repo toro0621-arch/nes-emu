@@ -772,6 +772,7 @@ export class PsxMachine implements Machine {
       p.sio,
       p.cdrom.disc,
       this.disc,
+      p.cpu.jit,
       ...p.stateSkip(),
       ...p.gpu.stateSkip(),
       ...p.cdrom.stateSkip(),
@@ -782,6 +783,8 @@ export class PsxMachine implements Machine {
   }
   loadState(st: SaveState) {
     applyState(st, 'psx', this.id, this.parts());
+    // メモリの中身が変わったので、関数にしたプログラムは全部捨てる
+    this.psx.cpu.jit?.clear();
     // ディスクはセーブに入っていないので、今のディスクを入れ直す
     const cd = this.psx.cdrom;
     if (cd.lidOpen) cd.nextDisc = this.disc;
