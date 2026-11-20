@@ -71,6 +71,7 @@ export class Psx implements PsxBus {
     this.cpu = new R3000(this, this.gte);
     this.timers = new PsxTimers(now, (n) => this.raise(n));
     this.cdrom = new Cdrom(now, () => this.raise(2));
+    this.cdrom.biosRegion = biosRegion(this.bios);
     this.spu = new Spu(() => this.raise(9), this.cdrom.audio);
     this.sio = new Sio(now, () => this.raise(7));
     this.gpu.onIrq = () => this.raise(1);
@@ -582,4 +583,28 @@ export class Psx implements PsxBus {
   stateSkip(): unknown[] {
     return [this.ram16, this.ram32, this.bios, this.bios32, this.scratch32, this.scratch16, this.exe];
   }
+}
+
+/** BIOS の中の「System ROM Version 4.1 12/16/97 A」の最後の文字（J・A・E）で地域を見分ける */
+export function biosRegion(bios: Uint8Array): string | null {
+  const key = 'System ROM Version';
+  const head = key.charCodeAt(0);
+  for (let i = 0; i < bios.length - 64; i++) {
+    if (bios[i] !== head) continue;
+    let ok = true;
+    for (let k = 1; k < key.length; k++)
+      if (bios[i + k] !== key.charCodeAt(k)) {
+        ok = false;
+        break;
+      }
+    if (!ok) continue;
+    let txt = '';
+    for (let k = i; k < i + 64 && bios[k] >= 0x20 && bios[k] < 0x7f; k++) txt += String.fromCharCode(bios[k]);
+    const m = /([JAE])\s*$/.exec(txt);
+    if (m) return m[1] === 'J' ? 'SCEI' : m[1] === 'A' ? 'SCEA' : 'SCEE';
+  }
+  // いちばん古い日本の BIOS（SCPH-1000）にはこの文字がない
+  for (let i = 0; i < bios.length - 9; i++)
+    if (String.fromCharCode(...bios.subarray(i, i + 9)) === 'SCPH-1000') return 'SCEI';
+  return null;
 }

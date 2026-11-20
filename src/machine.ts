@@ -15,7 +15,7 @@ import { SNES_H, SNES_W } from './snes/ppu';
 import { LINE_CYCLES, LINES, MASTER_CLOCK, Snes } from './snes/snes';
 import { WS_H, WS_W } from './ws/display';
 import { isWsRom, Ws } from './ws/ws';
-import { Psx } from './psx/psx';
+import { Psx, biosRegion } from './psx/psx';
 import type { Disc } from './psx/disc';
 import { PAD } from './psx/sio';
 import { N64, N64PAD, isN64Rom } from './n64/n64';
@@ -787,6 +787,8 @@ export class PsxMachine implements Machine {
     if (cd.lidOpen) cd.nextDisc = this.disc;
     else cd.disc = this.disc;
     cd.fastRead = this.fastCd;
+    // BIOS を入れかえたあとに前のセーブを読んでも、今の BIOS の地域で答える
+    cd.biosRegion = biosRegion(this.psx.bios);
     this.psx.gpu.setTrueColor(this.trueColor);
     this.psx.gpu.render();
     this.psx.sio.cardDirty = true;

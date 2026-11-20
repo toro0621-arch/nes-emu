@@ -259,6 +259,16 @@ export class Disc {
   }
 
   /** ディスクのライセンスの国（起動したときの画面の速さを決める） */
+  /** ディスクのライセンスの文字（Inc. のあとに America・Europe と続くかで地域が分かる） */
+  license(): string {
+    const s = this.read(150 + 4);
+    if (!s) return 'SCEI';
+    let txt = '';
+    for (let i = 24; i < 24 + 80; i++) txt += String.fromCharCode(s[i]);
+    txt = txt.replace(/\s+/g, '');
+    return /Euro/i.test(txt) ? 'SCEE' : /Amer/i.test(txt) ? 'SCEA' : 'SCEI';
+  }
+
   region(): 'ntsc' | 'pal' {
     // セクター 4（システムエリア）にライセンスの文字がある
     const s = this.read(150 + 4);

@@ -138,6 +138,9 @@ export class Cdrom {
     private raiseIrq: () => void,
   ) {}
 
+  /** BIOS の地域の文字（SCEI＝日本・SCEA＝アメリカ・SCEE＝ヨーロッパ）。分からなければ null（ディスクに合わせる） */
+  biosRegion: string | null = null;
+
   /** ふたが開いている（ディスクの入れかえ中） */
   lidOpen = false;
   nextDisc: Disc | null = null;
@@ -352,8 +355,9 @@ export class Cdrom {
       case Later.GetId: {
         const d = this.disc!;
         if (d.tracks.every((t) => t.audio)) return [this.stat | 0x08, 0x90, 0, 0, 0, 0, 0, 0];
-        // ライセンスの文字（地域）
-        const lic = d.region() === 'pal' ? 'SCEE' : 'SCEA';
+        // ライセンスの文字（地域）。本物の BIOS は、自分の地域の文字でないとディスクを起動しない（ロゴのまま止まる）。
+        // 日本のゲームをアメリカの BIOS で、のような組み合わせでも遊べるように、BIOS の地域に合わせて答える（改造チップと同じ）
+        const lic = this.biosRegion ?? d.license();
         return [this.stat, 0x00, 0x20, 0x00, ...Array.from(lic, (ch) => ch.charCodeAt(0))];
       }
     }

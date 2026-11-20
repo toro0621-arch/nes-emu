@@ -1,3 +1,4 @@
+import { biosRegion } from '../src/psx/psx';
 // プレイステーション：互換 BIOS（OpenBIOS）で起動し、テストのプログラムと手作りの CD を動かす
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -179,5 +180,17 @@ describe('PlayStation のテストプログラム（npm run fetch-test-roms で 
     for (let i = 0; i < 90; i++) m.runFrame();
     expect(m.psx.cdrom.lidOpen).toBe(false);
     expect(m.psx.cdrom.disc).toBe(d2);
+  });
+
+  it('BIOS の地域を見分ける（ディスクの地域の答えを BIOS に合わせるため）', () => {
+    const mk = (t: string) => {
+      const b = new Uint8Array(512 * 1024);
+      for (let i = 0; i < t.length; i++) b[0x7ff32 + i] = t.charCodeAt(i);
+      return b;
+    };
+    expect(biosRegion(mk('System ROM Version 4.0 08/18/97 J'))).toBe('SCEI');
+    expect(biosRegion(mk('System ROM Version 4.1 12/16/97 A'))).toBe('SCEA');
+    expect(biosRegion(mk('System ROM Version 2.2 12/04/95 E'))).toBe('SCEE');
+    expect(biosRegion(new Uint8Array(1024))).toBe(null);
   });
 });
