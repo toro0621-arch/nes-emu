@@ -652,6 +652,12 @@ export class PsxMachine implements Machine {
   /** 読み込みを速く・色をなめらかに */
   private fastCd = false;
   private trueColor = false;
+  private fastBoot = false;
+  /** 起動のロゴを飛ばす（電源を入れた直後だけ効く） */
+  setFastBoot(on: boolean) {
+    this.fastBoot = on;
+    if (this.psx.frame === 0 && !this.exe) this.psx.setFastBoot(on);
+  }
   setFastCd(on: boolean) {
     this.fastCd = on;
     this.psx.cdrom.fastRead = on;
@@ -663,6 +669,7 @@ export class PsxMachine implements Machine {
 
   private make(): Psx {
     const p = new Psx(this.bios);
+    if (this.fastBoot && !this.exe) p.setFastBoot(true);
     p.cdrom.fastRead = this.fastCd;
     p.gpu.setTrueColor(this.trueColor);
     if (this.disc) {

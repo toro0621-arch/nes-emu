@@ -89,6 +89,27 @@ export class Psx implements PsxBus {
     return CPU_CLOCK / (this.lineCycles * this.lines);
   }
 
+  /** 起動のロゴを飛ばす前の BIOS の中身（元に戻すとき用） */
+  private bootOrig: number[] | null = null;
+
+  /**
+   * 起動のロゴ（SONY・PlayStation）を飛ばす。本物の BIOS のメニュー画面（シェル）の入口を
+   * 「画面を消してすぐ戻る」に書きかえると、BIOS はロゴを出さずにそのまま CD から起動する（DuckStation と同じやり方）。
+   * 互換 BIOS（OpenBIOS）はもともとロゴがないので何もしない。電源を入れる前だけ
+   */
+  setFastBoot(on: boolean): void {
+    if (biosRegion(this.bios) === null) return;
+    const at = 0x18000 >> 2;
+    if (on && !this.bootOrig) {
+      this.bootOrig = Array.from(this.bios32.subarray(at, at + FAST_BOOT.length));
+      // lui at,0x1f80 / lui t2,0x0300 / sw t2,0x1814(at)（画面を消す）/ jr ra / nop
+      this.bios32.set(FAST_BOOT, at);
+    } else if (!on && this.bootOrig) {
+      this.bios32.set(this.bootOrig, at);
+      this.bootOrig = null;
+    }
+  }
+
   insertDisc(d: Disc | null): void {
     this.cdrom.disc = d;
   }
@@ -621,3 +642,6 @@ export function biosRegion(bios: Uint8Array): string | null {
     if (String.fromCharCode(...bios.subarray(i, i + 9)) === 'SCPH-1000') return 'SCEI';
   return null;
 }
+
+/** 起動のロゴを飛ばすために、BIOS のメニュー画面の入口に書く命令 */
+const FAST_BOOT = [0x3c011f80, 0x3c0a0300, 0xac2a1814, 0x03e00008, 0x00000000];

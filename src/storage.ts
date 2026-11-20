@@ -243,10 +243,36 @@ export interface StoredState {
 
 export async function putState(id: string, slot: number, value: StoredState): Promise<boolean> {
   try {
-    await run('readwrite', (s) => s.put(value, `${id}:${slot}`), STATES);
+    const db = await open();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STATES, 'readwrite');
+      const st = tx.objectStore(STATES);
+      st.put(value, `${id}:${slot}`);
+      // 一覧に出す時刻と画面だけ、別に入れておく（一覧を出すたびに大きな中身を全部読まなくてすむように）
+      st.put({ time: value.time, thumb: value.thumb }, `${id}:${slot}:meta`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
     return true;
   } catch {
     return false;
+  }
+}
+
+/** どこでもセーブの時刻と画面だけ（中身は読まない） */
+export async function getStateMeta(id: string, slot: number): Promise<{ time: number; thumb: string } | null> {
+  try {
+    const meta = await run<{ time: number; thumb: string } | undefined>('readonly', (s) => s.get(`${id}:${slot}:meta`), STATES);
+    if (meta) return meta;
+    // 前の版で作ったセーブ：一度だけ中身を読んで、時刻と画面を別に入れておく
+    const full = await getState(id, slot);
+    if (!full) return null;
+    const m = { time: full.time, thumb: full.thumb };
+    await run('readwrite', (s) => s.put(m, `${id}:${slot}:meta`), STATES).catch(() => {});
+    return m;
+  } catch {
+    return null;
   }
 }
 

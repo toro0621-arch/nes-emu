@@ -14,6 +14,7 @@ import {
   deleteLibrary,
   getLibrary,
   getState,
+  getStateMeta,
   listLibrary,
   loadBios,
   putLibraryChecked,
@@ -255,7 +256,7 @@ async function autoSave(): Promise<void> {
   if (!m || !id || autoSaving) return;
   autoSaving = true;
   try {
-    await putState(id, AUTO_SLOT, { time: Date.now(), thumb: canvas.toDataURL('image/png'), state: m.saveState() });
+    await putState(id, AUTO_SLOT, { time: Date.now(), thumb: makeThumb(), state: m.saveState() });
   } finally {
     autoSaving = false;
   }
@@ -269,7 +270,7 @@ async function autoLoad(m: Machine, id: string): Promise<boolean> {
     return false; // 古い形式などは使わない
   }
   const img = new Image();
-  img.onload = () => ctx.drawImage(img, 0, 0);
+  img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   img.src = saved.thumb;
   return true;
 }
@@ -722,6 +723,7 @@ $('cheat-add').addEventListener('click', () => {
 // ---- プレイステーションの設定（全部のソフトで共通。最初はどちらもオン） ----
 const PSX_FAST_KEY = 'nes-emu:psx-fastcd';
 const PSX_TC_KEY = 'nes-emu:psx-truecolor';
+const PSX_BOOT_KEY = 'nes-emu:psx-fastboot';
 const loadFlag = (k: string) => {
   try {
     return localStorage.getItem(k) !== '0';
@@ -731,16 +733,19 @@ const loadFlag = (k: string) => {
 };
 let psxFastCd = loadFlag(PSX_FAST_KEY);
 let psxTrueColor = loadFlag(PSX_TC_KEY);
+let psxFastBoot = loadFlag(PSX_BOOT_KEY);
 function applyPsxSettings(m: Machine | null): void {
   if (m?.system !== 'psx') return;
   (m as PsxMachine).setFastCd(psxFastCd);
   (m as PsxMachine).setTrueColor(psxTrueColor);
+  (m as PsxMachine).setFastBoot(psxFastBoot);
 }
 function renderPsxSettings(): void {
   $('psx-section').hidden = machine?.system !== 'psx';
   for (const [id, on] of [
     ['psx-fastcd', psxFastCd],
     ['psx-truecolor', psxTrueColor],
+    ['psx-fastboot', psxFastBoot],
   ] as const) {
     const b = $<HTMLButtonElement>(id);
     b.textContent = on ? 'オン' : 'オフ';
@@ -751,12 +756,15 @@ function renderPsxSettings(): void {
 for (const [id, key] of [
   ['psx-fastcd', PSX_FAST_KEY],
   ['psx-truecolor', PSX_TC_KEY],
+  ['psx-fastboot', PSX_BOOT_KEY],
 ] as const) {
   $(id).addEventListener('click', () => {
     if (id === 'psx-fastcd') psxFastCd = !psxFastCd;
-    else psxTrueColor = !psxTrueColor;
+    else if (id === 'psx-truecolor') psxTrueColor = !psxTrueColor;
+    else psxFastBoot = !psxFastBoot;
+    const on = id === 'psx-fastcd' ? psxFastCd : id === 'psx-truecolor' ? psxTrueColor : psxFastBoot;
     try {
-      localStorage.setItem(key, (id === 'psx-fastcd' ? psxFastCd : psxTrueColor) ? '1' : '0');
+      localStorage.setItem(key, on ? '1' : '0');
     } catch {
       // 無視
     }
@@ -963,6 +971,23 @@ function button(label: string, run: () => void, className = 'btn'): HTMLButtonEl
   return b;
 }
 
+/**
+ * どこでもセーブの一覧に出す小さい画面。画面そのままの PNG は大きく、作るのに時間がかかる（プレイステーションは特に）ので、
+ * 縮めて JPEG にする
+ */
+function makeThumb(): string {
+  const w = 200;
+  const h = Math.max(1, Math.round((w * canvas.height) / Math.max(1, canvas.width)));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d');
+  if (!g) return canvas.toDataURL('image/jpeg', 0.8);
+  g.imageSmoothingEnabled = true;
+  g.drawImage(canvas, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', 0.8);
+}
+
 async function renderSlots(): Promise<void> {
   slotsEl.replaceChildren();
   const id = currentId;
@@ -973,8 +998,12 @@ async function renderSlots(): Promise<void> {
   }
   slotsHint.textContent = '好きなところで保存して、いつでもそこから続けられます（⤓ でファイルに書き出せます）';
   $('state-file-row').hidden = false;
+  // 時刻と画面だけ読む（中身はロードするときに読む）
+  const metas = await Promise.all(Array.from({ length: SLOTS }, (_, i) => getStateMeta(id, i + 1)));
+  if (id !== currentId) return;
+  slotsEl.replaceChildren();
   for (let slot = 1; slot <= SLOTS; slot++) {
-    const saved = await getState(id, slot);
+    const saved = metas[slot - 1];
     const row = document.createElement('div');
     row.className = 'slot';
     const thumb = document.createElement('img');
@@ -995,7 +1024,7 @@ async function renderSlots(): Promise<void> {
     row.append(thumb, info, save, load);
     if (saved) {
       // ファイルに書き出す（バックアップ・不具合の調査用）
-      const exp = button('⤓', () => exportState(slot, saved), 'btn');
+      const exp = button('⤓', () => void exportState(slot), 'btn');
       exp.title = 'ファイルに書き出す';
       exp.setAttribute('aria-label', `スロット ${slot} をファイルに書き出す`);
       row.append(exp);
@@ -1004,8 +1033,10 @@ async function renderSlots(): Promise<void> {
   }
 }
 
-function exportState(slot: number, saved: { time: number; thumb: string; state: unknown }): void {
-  if (!currentRom) return;
+async function exportState(slot: number): Promise<void> {
+  if (!currentRom || !currentId) return;
+  const saved = await getState(currentId, slot);
+  if (!saved || !currentRom) return;
   const text = stateToJson(saved.state, { game: currentRom.name, time: saved.time, thumb: saved.thumb });
   saveFile(text, `${baseName(currentRom.name)}-slot${slot}.state.json`, 'どこでもセーブをファイルに書き出しました');
 }
@@ -1030,7 +1061,7 @@ async function doSave(slot: number): Promise<void> {
   if (!machine || !currentId) return;
   const ok = await putState(currentId, slot, {
     time: Date.now(),
-    thumb: canvas.toDataURL('image/png'),
+    thumb: makeThumb(),
     state: machine.saveState(),
   });
   showToast(ok ? `スロット ${slot} にセーブしました` : 'セーブできませんでした（保存領域が使えません）');
@@ -1050,7 +1081,7 @@ async function doLoad(slot: number): Promise<void> {
   rewind.clear();
   // 画面はセーブしたときの絵を出しておく（次のフレームで描き直される）
   const img = new Image();
-  img.onload = () => ctx.drawImage(img, 0, 0);
+  img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   img.src = saved.thumb;
   acc = 0;
   closeMenu();
@@ -1290,16 +1321,27 @@ function renderFfSpeeds(): void {
 
 /** 早送り中の音は、間引いて高く速く鳴らす */
 function decimate(samples: Float32Array, n: number): Float32Array {
-  // 左・右が交互に並んでいるので、1 組ずつ間引く（1.5 倍などの半端な速さにも対応）
+  // 左・右が交互に並んでいるので、1 組ずつ縮める（1.5 倍などの半端な速さにも対応）。
+  // 1 つおきに拾うだけだとザラザラした音になるので、まとめる範囲の平均をとる
   const frames = Math.floor(samples.length / 2 / n);
   const out = new Float32Array(frames * 2);
   for (let i = 0; i < frames; i++) {
-    const j = Math.floor(i * n) * 2;
-    out[i * 2] = samples[j];
-    out[i * 2 + 1] = samples[j + 1];
+    const a = Math.floor(i * n);
+    const b = Math.max(a + 1, Math.floor((i + 1) * n));
+    let l = 0;
+    let r = 0;
+    for (let j = a; j < b; j++) {
+      l += samples[j * 2];
+      r += samples[j * 2 + 1];
+    }
+    out[i * 2] = l / (b - a);
+    out[i * 2 + 1] = r / (b - a);
   }
   return out;
 }
+
+/** 早送りで、実際に出せている速さ（重いゲームでは設定の倍率まで届かないので、それに合わせて音を縮める） */
+let ffRatio = 1;
 
 // 画面のリフレッシュレート（60Hz / 120Hz など）に関係なく、NES の 60.1fps で進める
 /** 1 回の画面更新（60Hz で 16.7ms）のうち、ゲームを進めるのに使う時間の目安 */
@@ -1326,6 +1368,7 @@ function loop(now: number): void {
     // たまったぶんを一気に進めようとすると画面がたまにしか変わらずカクカクするので、時間で区切って残りは捨てる
     const began = performance.now();
     let cost = 0;
+    let ranCount = 0;
     while (acc >= FRAME_MS / 2) {
       if (rewind.active) {
         // 巻き戻し中：ふつうの速さで、前の状態を順に見せる
@@ -1349,6 +1392,7 @@ function loop(now: number): void {
       rewind.record(machine);
       acc -= FRAME_MS;
       frames++;
+      ranCount++;
       ran = true;
       cost = performance.now() - t0;
     }
@@ -1360,7 +1404,16 @@ function loop(now: number): void {
       // 上下左右の 8 ドットは、実機のテレビでも見えない部分（左端の線やスクロールのちらつきが出る）なので切り落とす
       ctx.putImageData(image, -machine.crop, -machine.crop);
       const samples = machine.takeSamples();
-      audio.push(speed > 1 ? decimate(samples, speed) : samples);
+      if (speed > 1) {
+        // 設定の倍率ではなく、この画面更新で実際に進んだぶんだけ縮める。
+        // 届いていないのに倍率どおり縮めると、音が足りなくなって途切れ途切れになる
+        const actual = Math.min(speed, Math.max(1, (ranCount * FRAME_MS) / Math.max(1, dt)));
+        ffRatio = ffRatio * 0.8 + actual * 0.2;
+        audio.push(decimate(samples, ffRatio));
+      } else {
+        ffRatio = 1;
+        audio.push(samples);
+      }
       machine.setAudio(audio.sampleRate, audio.rateAdjust());
     }
   }
