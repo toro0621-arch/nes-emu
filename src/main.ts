@@ -29,6 +29,7 @@ import {
   saveSram,
   saveSramNow,
   type LibraryEntry,
+  type StoredState,
 } from './storage';
 import { SmoothScreen, type SmoothMode } from './smooth';
 import { fromRetroArchSrm } from './n64/n64';
@@ -210,6 +211,7 @@ async function startRom(
   }
   machine = next;
   currentId = id;
+  prefetchStates(id);
   currentSaveId = cardId ?? id;
   currentRom = { name, data };
   currentFiles = files ?? null;
@@ -990,6 +992,33 @@ function makeThumb(): string {
   return c.toDataURL('image/jpeg', 0.8);
 }
 
+/**
+ * どこでもセーブを、保存領域に加えてメモリにも置いておく（今のゲームのぶんだけ）。
+ * スマホの保存領域は、大きなセーブ（プレイステーション・64 は数 MB）を書くのも読むのも遅いことがあるので、
+ * セーブはメモリに置いた時点で終わりにして、保存領域へは後ろで書く。ロードもメモリにあればすぐ
+ */
+const stateCache = new Map<string, StoredState>();
+let cacheFor: string | null = null;
+function cacheOf(id: string): Map<string, StoredState> {
+  if (cacheFor !== id) {
+    stateCache.clear();
+    cacheFor = id;
+  }
+  return stateCache;
+}
+/** ゲームを始めたら、空いた時間にどこでもセーブを読んでおく（最初のロードも速く） */
+function prefetchStates(id: string): void {
+  setTimeout(async () => {
+    for (let slot = 1; slot <= SLOTS; slot++) {
+      if (currentId !== id) return;
+      const c = cacheOf(id);
+      if (c.has(`${slot}`)) continue;
+      const v = await getState(id, slot);
+      if (v && currentId === id && !c.has(`${slot}`)) c.set(`${slot}`, v);
+    }
+  }, 1500);
+}
+
 async function renderSlots(): Promise<void> {
   slotsEl.replaceChildren();
   const id = currentId;
@@ -1001,7 +1030,13 @@ async function renderSlots(): Promise<void> {
   slotsHint.textContent = '好きなところで保存して、いつでもそこから続けられます（⤓ でファイルに書き出せます）';
   $('state-file-row').hidden = false;
   // 時刻と画面だけ読む（中身はロードするときに読む）
-  const metas = await Promise.all(Array.from({ length: SLOTS }, (_, i) => getStateMeta(id, i + 1)));
+  const cache = cacheOf(id);
+  const metas = await Promise.all(
+    Array.from({ length: SLOTS }, (_, i) => {
+      const c = cache.get(`${i + 1}`);
+      return c ? Promise.resolve({ time: c.time, thumb: c.thumb }) : getStateMeta(id, i + 1);
+    }),
+  );
   if (id !== currentId) return;
   slotsEl.replaceChildren();
   for (let slot = 1; slot <= SLOTS; slot++) {
@@ -1037,7 +1072,7 @@ async function renderSlots(): Promise<void> {
 
 async function exportState(slot: number): Promise<void> {
   if (!currentRom || !currentId) return;
-  const saved = await getState(currentId, slot);
+  const saved = cacheOf(currentId).get(`${slot}`) ?? (await getState(currentId, slot));
   if (!saved || !currentRom) return;
   const text = stateToJson(saved.state, { game: currentRom.name, time: saved.time, thumb: saved.thumb });
   saveFile(text, `${baseName(currentRom.name)}-slot${slot}.state.json`, 'どこでもセーブをファイルに書き出しました');
@@ -1061,21 +1096,26 @@ $<HTMLInputElement>('state-file').addEventListener('change', async (e) => {
 
 async function doSave(slot: number): Promise<void> {
   if (!machine || !currentId) return;
-  const ok = await putState(currentId, slot, {
-    time: Date.now(),
-    thumb: makeThumb(),
-    state: machine.saveState(),
-  });
-  showToast(ok ? `スロット ${slot} にセーブしました` : 'セーブできませんでした（保存領域が使えません）');
-  await renderSlots();
+  const id = currentId;
+  const value: StoredState = { time: Date.now(), thumb: makeThumb(), state: machine.saveState() };
+  cacheOf(id).set(`${slot}`, value);
+  showToast(`スロット ${slot} にセーブしました`);
+  void renderSlots();
+  // 保存領域へは後ろで書く（終わるのを待たずに遊べる）
+  const ok = await putState(id, slot, value);
+  if (!ok) showToast('セーブを保存領域に書けませんでした（アプリを閉じると消えます）');
 }
 
 async function doLoad(slot: number): Promise<void> {
   if (!machine || !currentId) return;
-  const saved = await getState(currentId, slot);
+  const cache = cacheOf(currentId);
+  const hit = cache.get(`${slot}`);
+  const saved = hit ?? (await getState(currentId, slot));
   if (!saved) return;
+  if (!hit) cache.set(`${slot}`, saved);
   try {
-    machine.loadState(saved.state as SaveState);
+    // メモリに置いたものは、ロードしたあとのゲームに書きかえられないように写してから使う
+    machine.loadState(structuredClone(saved.state) as SaveState);
   } catch (e) {
     showToast(e instanceof Error ? e.message : 'ロードできませんでした');
     return;
