@@ -1332,6 +1332,7 @@ try {
   // 無視
 }
 let fastForward = false;
+let autoFfShown = false;
 const showFf = () => {
   ffButton.classList.toggle('on', fastForward);
   ffButton.setAttribute('aria-pressed', String(fastForward));
@@ -1445,6 +1446,12 @@ function loop(now: number): void {
     // 「セーブ中です」の間は自動で早送りする
     const autoFf = !fastForward && psxAutoFf && machine.system === 'psx' && (machine as PsxMachine).cardBusy;
     const speed = fastForward ? ffSpeed : autoFf ? 4 : 1;
+    // 自動の早送り中は、⏩ ボタンを光らせて分かるように
+    if (autoFf !== autoFfShown) {
+      autoFfShown = autoFf;
+      ffButton.classList.toggle('on', fastForward || autoFf);
+      ffButton.textContent = fastForward ? `⏩×${ffSpeed}` : autoFf ? '⏩💾' : '⏩';
+    }
     // 本体ごとのフレームレート（ファミコン 60.1、ゲームボーイ 59.7、ワンダースワン 75.5）で進める
     const FRAME_MS = 1000 / machine.fps;
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);

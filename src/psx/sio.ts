@@ -59,6 +59,8 @@ export function blankCard(): Uint8Array {
 const BYTE_CYCLES = 1088;
 /** ACK（次のバイトをどうぞ）の合図が来るまで */
 const ACK_CYCLES = 1088 + 340;
+/** 自動の早送りにする、1 秒あたりのメモリーカードの読み書きの回数 */
+const CARD_BURST = 20;
 /** /ACK の合図の長さ（クロック） */
 const ACK_PULSE = 100;
 
@@ -187,22 +189,38 @@ export class Sio {
     return [0xff, false];
   }
 
-  /** 最近メモリーカードを読み書きした時刻（新しい順に 4 回ぶん。自動の早送りに使う） */
-  cardTimes = [-1e12, -1e12, -1e12, -1e12];
+  /** 最近メモリーカードを読み書きした時刻（新しい順に CARD_BURST 回ぶん。自動の早送りに使う） */
+  cardTimes: number[] = new Array<number>(CARD_BURST).fill(-1e12);
 
-  /** 続けて読み書きしている最中か（カードがあるかの確かめでときどき読むだけのときは違う） */
+  /**
+   * セーブ・ロードで続けて読み書きしている最中か。
+   * ゲームによっては、遊んでいる間もカードがあるかをときどき読んで確かめるので、
+   * 「1 秒に CARD_BURST 回以上」続けて読み書きしているときだけにする（セーブ・ロードは 1 秒に 30 回ほど）
+   */
   cardBusy(): boolean {
     const now = this.now();
     const sec = 33868800;
-    return now - this.cardTimes[0] < sec / 4 && now - this.cardTimes[3] < sec * 1.5;
+    return now - this.cardTimes[0] < sec / 5 && now - this.cardTimes[CARD_BURST - 1] < sec;
+  }
+
+  /** 前に読み書きした場所 */
+  private cardLast = -1;
+
+  /**
+   * 読み書きした場所を覚える。同じ場所をくり返し読むのは「カードがあるか」の確かめなので数えない
+   * （セーブ・ロードは、となりの場所へ順に進んでいく）
+   */
+  private noteCard(): void {
+    const a = this.addr & 0x3ff;
+    if (a === this.cardLast) return;
+    this.cardLast = a;
+    this.cardTimes.pop();
+    this.cardTimes.unshift(this.now());
   }
 
   private memcard(v: number): [number, boolean] {
     const s = this.step++;
-    if (s === 1 && (v === 0x52 || v === 0x57)) {
-      this.cardTimes.pop();
-      this.cardTimes.unshift(this.now());
-    }
+
     if (s === 0) return [0xff, true];
     if (s === 1) {
       this.cmd = v;
@@ -222,6 +240,7 @@ export class Sio {
           case 5:
             this.addr |= v;
             this.addr &= 0x3ff;
+            this.noteCard();
             return [this.addr >> 8, true];
           case 6:
             return [0x5c, true];
@@ -253,6 +272,7 @@ export class Sio {
           case 5:
             this.addr |= v;
             this.chk ^= v;
+            this.noteCard();
             return [this.addr >> 8, true];
         }
         if (s < 6 + 128) {
