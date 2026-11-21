@@ -90,7 +90,12 @@ export class PsxJit {
     src.set(i, body);
     this.seg[i] = pc >>> 29;
     const fn = this.build(page, region, pc >>> 29, new Map([[i, body]]));
-    if (!fn) return null;
+    if (!fn) {
+      // 作れなかったブロックは、しばらくインタープリターで動かす（ほかのブロックは関数のまま）
+      src.delete(i);
+      this.heat[i] = 0;
+      return null;
+    }
     this.blocks[i] = fn;
     this.pending.set(region, this.tickNo);
     return fn;
@@ -162,7 +167,6 @@ export class PsxJit {
       ) as Block;
     } catch (e) {
       console.error(e);
-      this.ok = false;
       return null;
     }
   }

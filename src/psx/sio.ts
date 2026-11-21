@@ -214,6 +214,8 @@ export class Sio {
     const a = this.addr & 0x3ff;
     if (a === this.cardLast) return;
     this.cardLast = a;
+    // 前の版のセーブから戻すと数が足りないことがある
+    if (this.cardTimes.length !== CARD_BURST) this.cardTimes = new Array<number>(CARD_BURST).fill(-1e12);
     this.cardTimes.pop();
     this.cardTimes.unshift(this.now());
   }

@@ -1011,17 +1011,26 @@ function cacheOf(id: string): Map<string, StoredState> {
   }
   return stateCache;
 }
-/** ゲームを始めたら、空いた時間にどこでもセーブを読んでおく（最初のロードも速く） */
+/**
+ * メモリに置くのは 1 つだけ（最後にセーブ・ロードしたもの）。
+ * プレイステーション・64 のセーブは 1 つ 4〜9MB あるので、全部置くとスマホのメモリが足りなくなって重くなる
+ */
+function cachePut(id: string, slot: number, v: StoredState): void {
+  const c = cacheOf(id);
+  c.clear();
+  c.set(`${slot}`, v);
+}
+/** ゲームを始めたら、空いた時間にいちばん新しいどこでもセーブを 1 つだけ読んでおく（最初のロードも速く） */
 function prefetchStates(id: string): void {
   setTimeout(async () => {
-    for (let slot = 1; slot <= SLOTS; slot++) {
-      if (currentId !== id) return;
-      const c = cacheOf(id);
-      if (c.has(`${slot}`)) continue;
-      const v = await getState(id, slot);
-      if (v && currentId === id && !c.has(`${slot}`)) c.set(`${slot}`, v);
-    }
-  }, 1500);
+    if (currentId !== id || cacheOf(id).size > 0) return;
+    const metas = await Promise.all(Array.from({ length: SLOTS }, (_, i) => getStateMeta(id, i + 1)));
+    let best = -1;
+    for (let i = 0; i < SLOTS; i++) if (metas[i] && (best < 0 || metas[i]!.time > metas[best]!.time)) best = i;
+    if (best < 0 || currentId !== id || cacheOf(id).size > 0) return;
+    const v = await getState(id, best + 1);
+    if (v && currentId === id && cacheOf(id).size === 0) cachePut(id, best + 1, v);
+  }, 3000);
 }
 
 async function renderSlots(): Promise<void> {
@@ -1103,7 +1112,7 @@ async function doSave(slot: number): Promise<void> {
   if (!machine || !currentId) return;
   const id = currentId;
   const value: StoredState = { time: Date.now(), thumb: makeThumb(), state: machine.saveState() };
-  cacheOf(id).set(`${slot}`, value);
+  cachePut(id, slot, value);
   showToast(`スロット ${slot} にセーブしました`);
   void renderSlots();
   // 保存領域へは後ろで書く（終わるのを待たずに遊べる）
@@ -1117,7 +1126,7 @@ async function doLoad(slot: number): Promise<void> {
   const hit = cache.get(`${slot}`);
   const saved = hit ?? (await getState(currentId, slot));
   if (!saved) return;
-  if (!hit) cache.set(`${slot}`, saved);
+  if (!hit) cachePut(currentId, slot, saved);
   try {
     // メモリに置いたものは、ロードしたあとのゲームに書きかえられないように写してから使う
     machine.loadState(structuredClone(saved.state) as SaveState);
@@ -1249,9 +1258,11 @@ class Rewind {
     const st = m.saveState();
     if (this.buf.length === 0) {
       const size = stateBytes(st);
-      this.cap = Math.max(4, Math.min(60, Math.floor((40 << 20) / Math.max(1, size))));
-      // 大きい本体（64 は 9MB くらい）は、覚える間隔をあけて軽くする
-      this.every = size > 4 << 20 ? 60 : 10;
+      // 大きい本体（プレイステーションは 4MB・64 は 9MB くらい）は、覚える間隔をあけて、数も少なめにする。
+      // 10 フレームごとに 4MB を写すと、スマホでは写すたびに引っかかり、メモリの片付けも増えてカクカクする
+      const big = size > 2 << 20;
+      this.cap = Math.max(4, Math.min(60, Math.floor((big ? 24 << 20 : 40 << 20) / Math.max(1, size))));
+      this.every = big ? 60 : 10;
     }
     this.buf.push(st);
     if (this.buf.length > this.cap) this.buf.shift();
