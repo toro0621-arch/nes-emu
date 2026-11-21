@@ -187,8 +187,22 @@ export class Sio {
     return [0xff, false];
   }
 
+  /** 最近メモリーカードを読み書きした時刻（新しい順に 4 回ぶん。自動の早送りに使う） */
+  cardTimes = [-1e12, -1e12, -1e12, -1e12];
+
+  /** 続けて読み書きしている最中か（カードがあるかの確かめでときどき読むだけのときは違う） */
+  cardBusy(): boolean {
+    const now = this.now();
+    const sec = 33868800;
+    return now - this.cardTimes[0] < sec / 4 && now - this.cardTimes[3] < sec * 1.5;
+  }
+
   private memcard(v: number): [number, boolean] {
     const s = this.step++;
+    if (s === 1 && (v === 0x52 || v === 0x57)) {
+      this.cardTimes.pop();
+      this.cardTimes.unshift(this.now());
+    }
     if (s === 0) return [0xff, true];
     if (s === 1) {
       this.cmd = v;

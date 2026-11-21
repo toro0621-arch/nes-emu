@@ -687,6 +687,10 @@ export class PsxMachine implements Machine {
     this.psx.cdrom.swapDisc(disc);
   }
   setPalette() {}
+  /** メモリーカードを読み書きしている最中（ゲームの「セーブ中です」） */
+  get cardBusy(): boolean {
+    return this.psx.sio.cardBusy();
+  }
   get width() {
     return this.psx.gpu.outW;
   }

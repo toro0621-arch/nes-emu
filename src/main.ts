@@ -727,6 +727,7 @@ $('cheat-add').addEventListener('click', () => {
 const PSX_FAST_KEY = 'nes-emu:psx-fastcd';
 const PSX_TC_KEY = 'nes-emu:psx-truecolor';
 const PSX_BOOT_KEY = 'nes-emu:psx-fastboot';
+const PSX_AUTOFF_KEY = 'nes-emu:psx-autoff';
 const loadFlag = (k: string) => {
   try {
     return localStorage.getItem(k) !== '0';
@@ -737,6 +738,7 @@ const loadFlag = (k: string) => {
 let psxFastCd = loadFlag(PSX_FAST_KEY);
 let psxTrueColor = loadFlag(PSX_TC_KEY);
 let psxFastBoot = loadFlag(PSX_BOOT_KEY);
+let psxAutoFf = loadFlag(PSX_AUTOFF_KEY);
 function applyPsxSettings(m: Machine | null): void {
   if (m?.system !== 'psx') return;
   (m as PsxMachine).setFastCd(psxFastCd);
@@ -749,6 +751,7 @@ function renderPsxSettings(): void {
     ['psx-fastcd', psxFastCd],
     ['psx-truecolor', psxTrueColor],
     ['psx-fastboot', psxFastBoot],
+    ['psx-autoff', psxAutoFf],
   ] as const) {
     const b = $<HTMLButtonElement>(id);
     b.textContent = on ? 'オン' : 'オフ';
@@ -760,12 +763,14 @@ for (const [id, key] of [
   ['psx-fastcd', PSX_FAST_KEY],
   ['psx-truecolor', PSX_TC_KEY],
   ['psx-fastboot', PSX_BOOT_KEY],
+  ['psx-autoff', PSX_AUTOFF_KEY],
 ] as const) {
   $(id).addEventListener('click', () => {
     if (id === 'psx-fastcd') psxFastCd = !psxFastCd;
     else if (id === 'psx-truecolor') psxTrueColor = !psxTrueColor;
-    else psxFastBoot = !psxFastBoot;
-    const on = id === 'psx-fastcd' ? psxFastCd : id === 'psx-truecolor' ? psxTrueColor : psxFastBoot;
+    else if (id === 'psx-fastboot') psxFastBoot = !psxFastBoot;
+    else psxAutoFf = !psxAutoFf;
+    const on = id === 'psx-fastcd' ? psxFastCd : id === 'psx-truecolor' ? psxTrueColor : id === 'psx-fastboot' ? psxFastBoot : psxAutoFf;
     try {
       localStorage.setItem(key, on ? '1' : '0');
     } catch {
@@ -1436,7 +1441,10 @@ function loop(now: number): void {
   const dt = now - last;
   last = now;
   if (machine && image && !document.hidden && !menuOpen) {
-    const speed = fastForward ? ffSpeed : 1;
+    // プレイステーションのメモリーカードは本物どおり遅い（ゲームが 1 回読み書きするごとに画面 2 枚ぶん待つ）ので、
+    // 「セーブ中です」の間は自動で早送りする
+    const autoFf = !fastForward && psxAutoFf && machine.system === 'psx' && (machine as PsxMachine).cardBusy;
+    const speed = fastForward ? ffSpeed : autoFf ? 4 : 1;
     // 本体ごとのフレームレート（ファミコン 60.1、ゲームボーイ 59.7、ワンダースワン 75.5）で進める
     const FRAME_MS = 1000 / machine.fps;
     acc = Math.min(acc + dt * speed, FRAME_MS * 3 * speed);
